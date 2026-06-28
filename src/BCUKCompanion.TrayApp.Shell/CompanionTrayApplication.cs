@@ -99,15 +99,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
         _settingsWindow = new SettingsWindow(_companionClient, _settings, _isConnected);
         _settingsWindow.LoggedOut += (_, _) => ShowLoginWindow();
-        _settingsWindow.SettingsSaved += OnSettingsSaved;
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
-    }
-
-    private void OnSettingsSaved(object? sender, AppSettings settings)
-    {
-        ApplyBotHostChange(settings.BotHost);
     }
 
     /// <summary>

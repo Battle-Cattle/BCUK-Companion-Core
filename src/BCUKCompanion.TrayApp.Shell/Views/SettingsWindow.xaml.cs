@@ -10,7 +10,6 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
 
     public event EventHandler? LoggedOut;
-    public event EventHandler<AppSettings>? SettingsSaved;
 
     public SettingsWindow(CompanionClient companionClient, AppSettings settings, bool isConnected)
     {
@@ -18,7 +17,7 @@ public partial class SettingsWindow : Window
         _settings = settings;
         InitializeComponent();
 
-        BotHostBox.Text = settings.BotHost;
+        BotHostText.Text = settings.BotHost;
         StartWithWindowsCheckBox.IsChecked = AutoStartService.IsEnabled();
         ConnectionStatusText.Text = isConnected ? "Status: connected" : "Status: not connected";
     }
@@ -26,32 +25,17 @@ public partial class SettingsWindow : Window
     /// <summary>Reflects a bot host changed elsewhere (the Login window's own server field) while this window is open.</summary>
     internal void RefreshBotHost(string botHost)
     {
-        BotHostBox.Text = botHost;
+        BotHostText.Text = botHost;
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
-        string newBotHost = BotHostBox.Text.Trim();
-        if (!Uri.TryCreate(newBotHost, UriKind.Absolute, out Uri? parsedHost)
-            || (parsedHost.Scheme != Uri.UriSchemeHttp && parsedHost.Scheme != Uri.UriSchemeHttps))
-        {
-            StatusText.Text = "Enter a valid http(s) server URL.";
-            return;
-        }
-
-        bool botHostChanged = !string.Equals(_settings.BotHost, newBotHost, StringComparison.OrdinalIgnoreCase);
-
-        _settings.BotHost = newBotHost;
         _settings.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
         _settings.Save();
 
         AutoStartService.SetEnabled(_settings.StartWithWindows);
 
-        StatusText.Text = botHostChanged
-            ? "Saved. Now using the new server URL."
-            : "Saved.";
-
-        SettingsSaved?.Invoke(this, _settings);
+        StatusText.Text = "Saved.";
     }
 
     private void LogOutButton_Click(object sender, RoutedEventArgs e)

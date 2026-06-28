@@ -12,6 +12,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -19,15 +20,16 @@
         <TextBlock Grid.Row="0" Text="Settings" FontSize="18" FontWeight="Bold" Margin="0,0,0,12" />
 
         <TextBlock Grid.Row="1" Text="Bot server URL" FontWeight="SemiBold" />
-        <TextBox Grid.Row="2" x:Name="BotHostBox" Height="26" Margin="0,4,0,12" />
+        <TextBlock Grid.Row="2" x:Name="BotHostText" Margin="0,4,0,4" />
+        <TextBlock Grid.Row="3" Text="Log out to switch to a different server." Foreground="Gray" FontSize="11" Margin="0,0,0,12" />
 
-        <CheckBox Grid.Row="3" x:Name="StartWithWindowsCheckBox" Content="Start automatically when Windows starts" />
+        <CheckBox Grid.Row="4" x:Name="StartWithWindowsCheckBox" Content="Start automatically when Windows starts" />
 
-        <TextBlock Grid.Row="4" x:Name="ConnectionStatusText" Margin="0,16,0,0" FontWeight="SemiBold" />
+        <TextBlock Grid.Row="5" x:Name="ConnectionStatusText" Margin="0,16,0,0" FontWeight="SemiBold" />
 
-        <TextBlock Grid.Row="5" x:Name="StatusText" Foreground="Gray" TextWrapping="Wrap" Margin="0,8,0,0" />
+        <TextBlock Grid.Row="6" x:Name="StatusText" Foreground="Gray" TextWrapping="Wrap" Margin="0,8,0,0" />
 
-        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
             <Button x:Name="LogOutButton" Content="Log Out" Width="90" Margin="0,0,8,0" Click="LogOutButton_Click" />
             <Button x:Name="SaveButton" Content="Save" Width="90" Margin="0,0,8,0" Click="SaveButton_Click" />
             <Button x:Name="CloseButton" Content="Close" Width="90" Click="CloseButton_Click" />
