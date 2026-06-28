@@ -29,7 +29,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
     }
 
-    public new static void Run(CompanionTrayAppOptions? options = null)
+    public static void Run(CompanionTrayAppOptions? options = null)
     {
         var app = new CompanionTrayApplication(options ?? new CompanionTrayAppOptions());
         ((System.Windows.Application)app).Run();
