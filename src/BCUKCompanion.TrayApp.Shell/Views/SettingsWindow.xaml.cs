@@ -25,9 +25,17 @@ public partial class SettingsWindow : Window
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
-        bool botHostChanged = !string.Equals(_settings.BotHost, BotHostBox.Text.Trim(), StringComparison.OrdinalIgnoreCase);
+        string newBotHost = BotHostBox.Text.Trim();
+        if (!Uri.TryCreate(newBotHost, UriKind.Absolute, out Uri? parsedHost)
+            || (parsedHost.Scheme != Uri.UriSchemeHttp && parsedHost.Scheme != Uri.UriSchemeHttps))
+        {
+            StatusText.Text = "Enter a valid http(s) server URL.";
+            return;
+        }
 
-        _settings.BotHost = BotHostBox.Text.Trim();
+        bool botHostChanged = !string.Equals(_settings.BotHost, newBotHost, StringComparison.OrdinalIgnoreCase);
+
+        _settings.BotHost = newBotHost;
         _settings.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
         _settings.Save();
 

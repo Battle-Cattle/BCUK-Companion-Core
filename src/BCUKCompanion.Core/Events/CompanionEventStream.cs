@@ -43,7 +43,6 @@ public sealed class CompanionEventStream
                 return;
             }
 
-            attempt++;
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Disconnected);
 
             try
@@ -54,6 +53,8 @@ public sealed class CompanionEventStream
             {
                 return;
             }
+
+            attempt++;
         }
     }
 
@@ -68,12 +69,13 @@ public sealed class CompanionEventStream
         // means the connection is dead even without a TCP-level signal.
         using var idleCts = new CancellationTokenSource();
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, idleCts.Token);
+        ResetIdleTimer(idleCts);
 
         HttpResponseMessage response;
         try
         {
             response = await _httpClient
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linkedCts.Token)
                 .ConfigureAwait(false);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
@@ -158,7 +160,7 @@ public sealed class CompanionEventStream
             return;
         }
 
-        if (redemption is not null)
+        if (redemption is not null && !string.IsNullOrEmpty(redemption.RewardId) && !string.IsNullOrEmpty(redemption.UserLogin))
         {
             RedemptionReceived?.Invoke(this, redemption);
         }

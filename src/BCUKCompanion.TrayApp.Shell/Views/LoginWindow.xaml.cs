@@ -45,7 +45,16 @@ public partial class LoginWindow : Window
             return;
         }
 
-        _companionClient.SetManualToken(token);
+        try
+        {
+            _companionClient.SetManualToken(token);
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = $"Couldn't save token: {ex.Message}";
+            return;
+        }
+
         LoginSucceeded?.Invoke(this, EventArgs.Empty);
         Close();
     }

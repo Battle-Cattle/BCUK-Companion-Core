@@ -7,6 +7,9 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
-        CompanionTrayApplication.Run();
+        CompanionTrayApplication.Run(new CompanionTrayAppOptions
+        {
+            DataFolderName = "BCUKCompanion.TrayApp.Sample"
+        });
     }
 }

@@ -41,6 +41,11 @@ public sealed class CompanionClient : IDisposable
     /// <summary>Saves a token the user pasted in from the dashboard's manual-token page (Option B).</summary>
     public void SetManualToken(string token)
     {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new ArgumentException("Token must not be blank.", nameof(token));
+        }
+
         _tokenStore.Save(token);
     }
 
@@ -63,6 +68,14 @@ public sealed class CompanionClient : IDisposable
         StopListening();
         _eventLoopCts = new CancellationTokenSource();
         _eventLoopTask = Events.RunAsync(token, _eventLoopCts.Token);
+
+        // RunAsync isn't awaited by any caller — observe faults here so they
+        // don't surface later as unobserved task exceptions.
+        _eventLoopTask.ContinueWith(
+            static t => _ = t.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted,
+            TaskScheduler.Default);
     }
 
     public void StopListening()

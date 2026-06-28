@@ -28,9 +28,17 @@ public sealed class DpapiFileTokenStore : ITokenStore
             return null;
         }
 
-        byte[] encrypted = File.ReadAllBytes(_filePath);
-        byte[] decrypted = ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser);
-        return Encoding.UTF8.GetString(decrypted);
+        try
+        {
+            byte[] encrypted = File.ReadAllBytes(_filePath);
+            byte[] decrypted = ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(decrypted);
+        }
+        catch (CryptographicException)
+        {
+            // Blob is corrupted or was written by a different user/machine — treat as logged out.
+            return null;
+        }
     }
 
     public void Save(string token)

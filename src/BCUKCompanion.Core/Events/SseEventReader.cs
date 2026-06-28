@@ -62,6 +62,11 @@ public sealed class SseEventReader
             }
             // id:, retry:, and any other field types are ignored — unused by this endpoint.
         }
+
+        if (dataLines is { Count: > 0 })
+        {
+            yield return new SseEvent { EventName = eventName, Data = string.Join('\n', dataLines) };
+        }
     }
 
     private static string StripFieldPrefix(string line, string prefix)

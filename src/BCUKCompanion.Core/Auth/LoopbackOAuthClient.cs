@@ -34,22 +34,36 @@ public sealed class LoopbackOAuthClient
         CancellationToken cancellationToken = default)
     {
         string state = GenerateState();
-        int port = GetFreeLoopbackPort();
-        var redirectUri = new Uri($"http://127.0.0.1:{port}/callback");
-
         using var listener = new HttpListener();
-        listener.Prefixes.Add($"http://127.0.0.1:{port}/callback/");
-        listener.Start();
+        int port = StartListenerOnFreePort(listener);
+        var redirectUri = new Uri($"http://127.0.0.1:{port}/callback");
 
         try
         {
             Uri loginUrl = BuildLoginUrl(redirectUri, state);
             await openBrowser(loginUrl).ConfigureAwait(false);
 
-            string code = await WaitForCallbackAsync(
+            (HttpListenerContext context, string code) = await WaitForCallbackAsync(
                 listener, state, timeout ?? TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
 
-            return await ExchangeCodeForTokenAsync(code, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                // Don't tell the browser login succeeded until the code has actually
+                // been exchanged for a token — otherwise a later exchange failure
+                // leaves the user seeing a false "success" page.
+                string token = await ExchangeCodeForTokenAsync(code, cancellationToken).ConfigureAwait(false);
+                RespondHtml(context, 200, "<html><body>Login successful — you can close this window and return to the app.</body></html>");
+                return token;
+            }
+            catch (Exception)
+            {
+                RespondHtml(context, 502, "<html><body>Login failed: the app could not complete sign-in. You can close this window.</body></html>");
+                throw;
+            }
+            finally
+            {
+                context.Response.OutputStream.Close();
+            }
         }
         finally
         {
@@ -73,6 +87,32 @@ public sealed class LoopbackOAuthClient
             .TrimEnd('=');
     }
 
+    /// <summary>
+    /// Probes for a free loopback port and starts <paramref name="listener"/> on it,
+    /// retrying with a new port if another process wins the race for the one just probed.
+    /// </summary>
+    private static int StartListenerOnFreePort(HttpListener listener)
+    {
+        const int maxAttempts = 5;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            int port = GetFreeLoopbackPort();
+            listener.Prefixes.Clear();
+            listener.Prefixes.Add($"http://127.0.0.1:{port}/callback/");
+            try
+            {
+                listener.Start();
+                return port;
+            }
+            catch (HttpListenerException) when (attempt < maxAttempts)
+            {
+                // Another process grabbed the port between the probe and the bind — retry with a new one.
+            }
+        }
+
+        throw new CompanionAuthException("Could not bind a local port for the companion login callback.");
+    }
+
     private static int GetFreeLoopbackPort()
     {
         var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -82,7 +122,7 @@ public sealed class LoopbackOAuthClient
         return port;
     }
 
-    private static async Task<string> WaitForCallbackAsync(
+    private static async Task<(HttpListenerContext Context, string Code)> WaitForCallbackAsync(
         HttpListener listener, string expectedState, TimeSpan timeout, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -103,24 +143,18 @@ public sealed class LoopbackOAuthClient
         }
 
         HttpListenerContext context = await contextTask.ConfigureAwait(false);
-        try
-        {
-            string? code = context.Request.QueryString["code"];
-            string? returnedState = context.Request.QueryString["state"];
 
-            if (string.IsNullOrEmpty(code) || returnedState != expectedState)
-            {
-                RespondHtml(context, 400, "<html><body>Login failed: invalid response from server.</body></html>");
-                throw new CompanionAuthException("Loopback callback returned a missing code or mismatched state.");
-            }
+        string? code = context.Request.QueryString["code"];
+        string? returnedState = context.Request.QueryString["state"];
 
-            RespondHtml(context, 200, "<html><body>Login successful — you can close this window and return to the app.</body></html>");
-            return code;
-        }
-        finally
+        if (string.IsNullOrEmpty(code) || returnedState != expectedState)
         {
+            RespondHtml(context, 400, "<html><body>Login failed: invalid response from server.</body></html>");
             context.Response.OutputStream.Close();
+            throw new CompanionAuthException("Loopback callback returned a missing code or mismatched state.");
         }
+
+        return (context, code);
     }
 
     private static void RespondHtml(HttpListenerContext context, int statusCode, string html)

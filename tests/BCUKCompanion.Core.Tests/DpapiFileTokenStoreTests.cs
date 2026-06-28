@@ -3,6 +3,7 @@ using Xunit;
 
 namespace BCUKCompanion.Core.Tests;
 
+#pragma warning disable CA1416 // Runtime-guarded below (Skip.IfNot) to only run on Windows.
 public class DpapiFileTokenStoreTests
 {
     [SkippableFact]
@@ -31,3 +32,4 @@ public class DpapiFileTokenStoreTests
         }
     }
 }
+#pragma warning restore CA1416

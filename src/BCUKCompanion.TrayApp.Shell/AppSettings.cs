@@ -21,7 +21,7 @@ public sealed class AppSettings
             {
                 string json = File.ReadAllText(AppPaths.SettingsFile);
                 AppSettings? loaded = JsonSerializer.Deserialize<AppSettings>(json);
-                if (loaded is not null)
+                if (loaded is not null && IsValidBotHost(loaded.BotHost))
                 {
                     return loaded;
                 }
@@ -35,6 +35,10 @@ public sealed class AppSettings
         return LoadDefaultsFromBundledConfig();
     }
 
+    private static bool IsValidBotHost(string botHost) =>
+        Uri.TryCreate(botHost, UriKind.Absolute, out Uri? uri)
+        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
     private static AppSettings LoadDefaultsFromBundledConfig()
     {
         var settings = new AppSettings();
@@ -44,9 +48,11 @@ public sealed class AppSettings
             if (File.Exists(bundledPath))
             {
                 using JsonDocument document = JsonDocument.Parse(File.ReadAllText(bundledPath));
-                if (document.RootElement.TryGetProperty("botHost", out JsonElement botHostElement))
+                if (document.RootElement.TryGetProperty("botHost", out JsonElement botHostElement)
+                    && botHostElement.GetString() is string bundledBotHost
+                    && IsValidBotHost(bundledBotHost))
                 {
-                    settings.BotHost = botHostElement.GetString() ?? settings.BotHost;
+                    settings.BotHost = bundledBotHost;
                 }
             }
         }
@@ -60,13 +66,19 @@ public sealed class AppSettings
 
     public void Save()
     {
-        string? directory = Path.GetDirectoryName(AppPaths.SettingsFile);
+        string settingsFile = AppPaths.SettingsFile;
+        string? directory = Path.GetDirectoryName(settingsFile);
         if (!string.IsNullOrEmpty(directory))
         {
             Directory.CreateDirectory(directory);
         }
 
         string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(AppPaths.SettingsFile, json);
+
+        // Write to a temp file and swap it in so a crash/power-loss mid-write can't
+        // leave settings.json truncated or invalid JSON.
+        string tempFile = settingsFile + ".tmp";
+        File.WriteAllText(tempFile, json);
+        File.Move(tempFile, settingsFile, overwrite: true);
     }
 }
