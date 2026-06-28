@@ -38,13 +38,18 @@ public sealed class CompanionEventStream
         {
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connecting);
 
-            bool shouldStop = await ConnectOnceAsync(token, cancellationToken).ConfigureAwait(false);
+            (bool shouldStop, bool wasConnected) = await ConnectOnceAsync(token, cancellationToken).ConfigureAwait(false);
             if (shouldStop)
             {
                 return;
             }
 
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Disconnected);
+
+            if (wasConnected)
+            {
+                attempt = 0;
+            }
 
             try
             {
@@ -59,8 +64,8 @@ public sealed class CompanionEventStream
         }
     }
 
-    /// <summary>Connects once. Returns true if the caller should stop retrying (auth failure).</summary>
-    private async Task<bool> ConnectOnceAsync(string token, CancellationToken cancellationToken)
+    /// <summary>Connects once. ShouldStop is true if the caller should stop retrying (auth failure).</summary>
+    private async Task<(bool ShouldStop, bool WasConnected)> ConnectOnceAsync(string token, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/events");
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
@@ -81,7 +86,7 @@ public sealed class CompanionEventStream
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            return false;
+            return (ShouldStop: false, WasConnected: false);
         }
 
         using (response)
@@ -89,18 +94,18 @@ public sealed class CompanionEventStream
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 ConnectionStateChanged?.Invoke(this, CompanionConnectionState.AuthenticationFailed);
-                return true;
+                return (ShouldStop: true, WasConnected: false);
             }
 
             if (response.StatusCode == (HttpStatusCode)429)
             {
                 ConnectionStateChanged?.Invoke(this, CompanionConnectionState.RateLimited);
-                return false;
+                return (ShouldStop: false, WasConnected: false);
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return false;
+                return (ShouldStop: false, WasConnected: false);
             }
 
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connected);
@@ -128,7 +133,7 @@ public sealed class CompanionEventStream
                 // Connection dropped — fall through to reconnect.
             }
 
-            return false;
+            return (ShouldStop: false, WasConnected: true);
         }
     }
 
@@ -169,7 +174,7 @@ public sealed class CompanionEventStream
 
     private static bool IsComplete(RedemptionEvent redemption) =>
         redemption.RedeemedAt != default
-        && RequiredStringFields(redemption).All(field => !string.IsNullOrEmpty(field));
+        && RequiredStringFields(redemption).All(field => !string.IsNullOrWhiteSpace(field));
 
     private static IEnumerable<string> RequiredStringFields(RedemptionEvent redemption)
     {
