@@ -1,0 +1,59 @@
+name: .NET
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Build & test Core (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet build src/BCUKCompanion.Core
+      - run: dotnet test tests/BCUKCompanion.Core.Tests
+
+  tray-app:
+    name: Build TrayApp Shell + Sample (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet build src/BCUKCompanion.TrayApp.Shell
+      - run: dotnet build samples/BCUKCompanion.TrayApp.Sample
+
+  publish-packages:
+    name: Pack & publish NuGet packages
+    needs: [core, tray-app]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet pack src/BCUKCompanion.Core --configuration Release --output ./packages
+      - run: dotnet pack src/BCUKCompanion.TrayApp.Shell --configuration Release --output ./packages
+      - run: >
+          dotnet nuget push ./packages/*.nupkg
+          --source https://nuget.pkg.github.com/Battle-Cattle/index.json
+          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --skip-duplicate
+        shell: bash

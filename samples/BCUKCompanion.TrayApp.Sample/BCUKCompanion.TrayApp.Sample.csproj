@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>BCUKCompanion.TrayApp.Sample</RootNamespace>
+    <AssemblyName>BCUKCompanion.TrayApp.Sample</AssemblyName>
+    <!--
+      This sample uses ProjectReference so it builds against this repo's in-progress code.
+      A real per-user app repo replaces these two with PackageReference to the published
+      BCUKCompanion.Core / BCUKCompanion.TrayApp.Shell packages — see README.md.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\BCUKCompanion.Core\BCUKCompanion.Core.csproj" />
+    <ProjectReference Include="..\..\src\BCUKCompanion.TrayApp.Shell\BCUKCompanion.TrayApp.Shell.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
