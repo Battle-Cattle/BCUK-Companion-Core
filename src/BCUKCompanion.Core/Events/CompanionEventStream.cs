@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using BCUKCompanion.Core.Models;
+using System.Linq;
 
 namespace BCUKCompanion.Core.Events;
 
@@ -167,10 +168,15 @@ public sealed class CompanionEventStream
     }
 
     private static bool IsComplete(RedemptionEvent redemption) =>
-        !string.IsNullOrEmpty(redemption.Type)
-        && !string.IsNullOrEmpty(redemption.RewardId)
-        && !string.IsNullOrEmpty(redemption.RewardTitle)
-        && !string.IsNullOrEmpty(redemption.UserLogin)
-        && !string.IsNullOrEmpty(redemption.UserName)
-        && redemption.RedeemedAt != default;
+        redemption.RedeemedAt != default
+        && RequiredStringFields(redemption).All(field => !string.IsNullOrEmpty(field));
+
+    private static IEnumerable<string> RequiredStringFields(RedemptionEvent redemption)
+    {
+        yield return redemption.Type;
+        yield return redemption.RewardId;
+        yield return redemption.RewardTitle;
+        yield return redemption.UserLogin;
+        yield return redemption.UserName;
+    }
 }
