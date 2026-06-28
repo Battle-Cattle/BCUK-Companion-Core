@@ -83,6 +83,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
         _loginWindow = new LoginWindow(_companionClient, _settings.BotHost);
         _loginWindow.LoginSucceeded += (_, _) => _companionClient.StartListening();
+        _loginWindow.ServerHostChanged += OnLoginServerHostChanged;
         _loginWindow.Closed += (_, _) => _loginWindow = null;
         _loginWindow.Show();
         _loginWindow.Activate();
@@ -104,14 +105,30 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _settingsWindow.Activate();
     }
 
+    private void OnSettingsSaved(object? sender, AppSettings settings)
+    {
+        ApplyBotHostChange(settings.BotHost);
+    }
+
     /// <summary>
-    /// Re-points the companion client at the saved bot host without making any
+    /// The Login window's own server field doesn't go through Settings, since it
+    /// needs to work before the user is logged in — persist it the same way Settings does.
+    /// </summary>
+    private void OnLoginServerHostChanged(object? sender, string newBotHost)
+    {
+        _settings.BotHost = newBotHost;
+        _settings.Save();
+        ApplyBotHostChange(newBotHost);
+    }
+
+    /// <summary>
+    /// Re-points the companion client at the new bot host without making any
     /// network call — login (and any resulting connection) only happens if the
     /// user subsequently clicks Login.
     /// </summary>
-    private void OnSettingsSaved(object? sender, AppSettings settings)
+    private void ApplyBotHostChange(string newBotHost)
     {
-        if (string.Equals(_botHost.OriginalString, settings.BotHost, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(_botHost.OriginalString, newBotHost, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -122,9 +139,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _companionClient.Events.ConnectionStateChanged -= OnConnectionStateChanged;
         _companionClient.Dispose();
 
-        _botHost = new Uri(settings.BotHost);
+        _botHost = new Uri(newBotHost);
         _companionClient = CreateCompanionClient(_botHost);
-        _loginWindow?.UpdateCompanionClient(_companionClient, settings.BotHost);
+        _loginWindow?.UpdateCompanionClient(_companionClient, newBotHost);
+        _settingsWindow?.RefreshBotHost(newBotHost);
 
         if (wasLoggedIn)
         {

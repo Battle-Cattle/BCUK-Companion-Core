@@ -23,6 +23,12 @@ public partial class SettingsWindow : Window
         ConnectionStatusText.Text = isConnected ? "Status: connected" : "Status: not connected";
     }
 
+    /// <summary>Reflects a bot host changed elsewhere (the Login window's own server field) while this window is open.</summary>
+    internal void RefreshBotHost(string botHost)
+    {
+        BotHostBox.Text = botHost;
+    }
+
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         string newBotHost = BotHostBox.Text.Trim();

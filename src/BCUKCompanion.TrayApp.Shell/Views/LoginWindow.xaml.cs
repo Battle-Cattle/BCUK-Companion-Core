@@ -10,18 +10,35 @@ public partial class LoginWindow : Window
 
     public event EventHandler? LoginSucceeded;
 
+    /// <summary>Raised when the user changes the server URL from this window, before any login attempt.</summary>
+    public event EventHandler<string>? ServerHostChanged;
+
     public LoginWindow(CompanionClient companionClient, string botHost)
     {
         _companionClient = companionClient;
         InitializeComponent();
-        BotHostText.Text = $"Server: {botHost}";
+        ServerHostBox.Text = botHost;
     }
 
     /// <summary>Re-points this still-open window at a companion client created for a newly saved bot host.</summary>
     internal void UpdateCompanionClient(CompanionClient companionClient, string botHost)
     {
         _companionClient = companionClient;
-        BotHostText.Text = $"Server: {botHost}";
+        ServerHostBox.Text = botHost;
+    }
+
+    private void ChangeServerButton_Click(object sender, RoutedEventArgs e)
+    {
+        string newBotHost = ServerHostBox.Text.Trim();
+        if (!Uri.TryCreate(newBotHost, UriKind.Absolute, out Uri? parsedHost)
+            || (parsedHost.Scheme != Uri.UriSchemeHttp && parsedHost.Scheme != Uri.UriSchemeHttps))
+        {
+            ServerStatusText.Text = "Enter a valid http(s) server URL.";
+            return;
+        }
+
+        ServerHostChanged?.Invoke(this, newBotHost);
+        ServerStatusText.Text = "Server updated. No connection has been made yet.";
     }
 
     private async void LoginWithBrowserButton_Click(object sender, RoutedEventArgs e)
