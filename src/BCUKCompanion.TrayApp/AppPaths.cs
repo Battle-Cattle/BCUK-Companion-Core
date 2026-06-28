@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace BCUKCompanion.TrayApp;
 
 /// <summary>Per-user data file locations under %APPDATA%/%LOCALAPPDATA%.</summary>
