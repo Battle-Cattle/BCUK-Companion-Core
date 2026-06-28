@@ -9,7 +9,12 @@ internal static class Program
     {
         CompanionTrayApplication.Run(new CompanionTrayAppOptions
         {
-            DataFolderName = "BCUKCompanion.TrayApp.Sample"
+            DataFolderName = "BCUKCompanion.TrayApp.Sample",
+            OnBotEvent = e => Console.WriteLine($"Bot event: {e.EventName}"),
+            AdditionalMenuItems = new[]
+            {
+                new TrayMenuItem("Sample Settings...", () => Console.WriteLine("Sample settings clicked"))
+            }
         });
     }
 }

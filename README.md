@@ -48,8 +48,8 @@ this repo.
 
    ```xml
    <ItemGroup>
-     <PackageReference Include="BCUKCompanion.Core" Version="0.1.0" />
-     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.1.0" />
+     <PackageReference Include="BCUKCompanion.Core" Version="0.2.0" />
+     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.2.0" />
    </ItemGroup>
    ```
 
@@ -68,6 +68,31 @@ this repo.
 
 4. Set the project's `AssemblyName`/`ApplicationIcon` to brand the build,
    and ship it as its own installer/exe.
+
+### Reacting to bot events and adding your own settings UI
+
+`CompanionTrayAppOptions` exposes two generic extension points so a
+companion app can plug in its own logic without owning any bot-connection
+or tray-icon code itself:
+
+```csharp
+CompanionTrayApplication.Run(new CompanionTrayAppOptions
+{
+    OnBotEvent = e => myDispatcher.DispatchAsync(e.EventName, e.Metadata),
+    AdditionalMenuItems = new[]
+    {
+        new TrayMenuItem("My Settings...", () => ShowMySettingsWindow())
+    }
+});
+```
+
+- `OnBotEvent` is invoked on the UI thread whenever the bot host reports an
+  event (currently: a channel-point redemption). `BotEventArgs.EventName`
+  is the redeem name; `Metadata` carries `rewardId`, `userLogin`,
+  `userName`, `userInput`, and `redeemedAt`.
+- `AdditionalMenuItems` are appended to the shared tray icon's context
+  menu (above "Exit"), so a companion app can surface its own settings
+  window from the existing tray icon instead of a command-line flag.
 
 See `samples/BCUKCompanion.TrayApp.Sample` in this repo for a working
 example (it uses `ProjectReference` instead of `PackageReference` since
