@@ -6,7 +6,7 @@ namespace BCUKCompanion.TrayApp.Views;
 
 public partial class LoginWindow : Window
 {
-    private readonly CompanionClient _companionClient;
+    private CompanionClient _companionClient;
 
     public event EventHandler? LoginSucceeded;
 
@@ -14,6 +14,13 @@ public partial class LoginWindow : Window
     {
         _companionClient = companionClient;
         InitializeComponent();
+        BotHostText.Text = $"Server: {botHost}";
+    }
+
+    /// <summary>Re-points this still-open window at a companion client created for a newly saved bot host.</summary>
+    internal void UpdateCompanionClient(CompanionClient companionClient, string botHost)
+    {
+        _companionClient = companionClient;
         BotHostText.Text = $"Server: {botHost}";
     }
 

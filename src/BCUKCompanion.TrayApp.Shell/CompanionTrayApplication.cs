@@ -17,6 +17,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     private readonly CompanionTrayAppOptions _options;
     private Mutex? _singleInstanceMutex;
     private AppSettings _settings = null!;
+    private Uri _botHost = null!;
     private CompanionClient _companionClient = null!;
     private TrayIconController _trayIcon = null!;
     private LoginWindow? _loginWindow;
@@ -54,9 +55,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
 
         _settings = AppSettings.Load();
-        _companionClient = new CompanionClient(new Uri(_settings.BotHost), new DpapiFileTokenStore(AppPaths.TokenFile));
-        _companionClient.Events.RedemptionReceived += OnRedemptionReceived;
-        _companionClient.Events.ConnectionStateChanged += OnConnectionStateChanged;
+        _botHost = new Uri(_settings.BotHost);
+        _companionClient = CreateCompanionClient(_botHost);
 
         _trayIcon = new TrayIconController();
         _trayIcon.OpenLoginRequested += (_, _) => ShowLoginWindow();
@@ -98,9 +98,46 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
         _settingsWindow = new SettingsWindow(_companionClient, _settings, _isConnected);
         _settingsWindow.LoggedOut += (_, _) => ShowLoginWindow();
+        _settingsWindow.SettingsSaved += OnSettingsSaved;
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    /// <summary>
+    /// Re-points the companion client at the saved bot host without making any
+    /// network call — login (and any resulting connection) only happens if the
+    /// user subsequently clicks Login.
+    /// </summary>
+    private void OnSettingsSaved(object? sender, AppSettings settings)
+    {
+        if (string.Equals(_botHost.OriginalString, settings.BotHost, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        bool wasLoggedIn = _companionClient.IsLoggedIn;
+
+        _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
+        _companionClient.Events.ConnectionStateChanged -= OnConnectionStateChanged;
+        _companionClient.Dispose();
+
+        _botHost = new Uri(settings.BotHost);
+        _companionClient = CreateCompanionClient(_botHost);
+        _loginWindow?.UpdateCompanionClient(_companionClient, settings.BotHost);
+
+        if (wasLoggedIn)
+        {
+            _companionClient.StartListening();
+        }
+    }
+
+    private CompanionClient CreateCompanionClient(Uri botHost)
+    {
+        var client = new CompanionClient(botHost, new DpapiFileTokenStore(AppPaths.TokenFile));
+        client.Events.RedemptionReceived += OnRedemptionReceived;
+        client.Events.ConnectionStateChanged += OnConnectionStateChanged;
+        return client;
     }
 
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption)

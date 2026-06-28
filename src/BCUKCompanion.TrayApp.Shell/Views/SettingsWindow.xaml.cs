@@ -42,7 +42,7 @@ public partial class SettingsWindow : Window
         AutoStartService.SetEnabled(_settings.StartWithWindows);
 
         StatusText.Text = botHostChanged
-            ? "Saved. Restart the app for the new server URL to take effect."
+            ? "Saved. Now using the new server URL."
             : "Saved.";
 
         SettingsSaved?.Invoke(this, _settings);
