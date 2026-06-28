@@ -66,6 +66,11 @@ public sealed class AppSettings
 
     public void Save()
     {
+        if (!IsValidBotHost(BotHost))
+        {
+            throw new InvalidOperationException("BotHost must be an absolute http(s) URL before settings can be saved.");
+        }
+
         string settingsFile = AppPaths.SettingsFile;
         string? directory = Path.GetDirectoryName(settingsFile);
         if (!string.IsNullOrEmpty(directory))

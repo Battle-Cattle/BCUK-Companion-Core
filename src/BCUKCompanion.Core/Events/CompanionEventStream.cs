@@ -107,7 +107,7 @@ public sealed class CompanionEventStream
 
             try
             {
-                await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                await using Stream stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
                 using var streamReader = new StreamReader(stream);
                 var sseReader = new SseEventReader(streamReader);
 
@@ -160,9 +160,17 @@ public sealed class CompanionEventStream
             return;
         }
 
-        if (redemption is not null && !string.IsNullOrEmpty(redemption.RewardId) && !string.IsNullOrEmpty(redemption.UserLogin))
+        if (redemption is not null && IsComplete(redemption))
         {
             RedemptionReceived?.Invoke(this, redemption);
         }
     }
+
+    private static bool IsComplete(RedemptionEvent redemption) =>
+        !string.IsNullOrEmpty(redemption.Type)
+        && !string.IsNullOrEmpty(redemption.RewardId)
+        && !string.IsNullOrEmpty(redemption.RewardTitle)
+        && !string.IsNullOrEmpty(redemption.UserLogin)
+        && !string.IsNullOrEmpty(redemption.UserName)
+        && redemption.RedeemedAt != default;
 }
