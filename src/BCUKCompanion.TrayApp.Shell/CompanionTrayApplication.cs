@@ -58,7 +58,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _companionClient.Events.RedemptionReceived += OnRedemptionReceived;
         _companionClient.Events.ConnectionStateChanged += OnConnectionStateChanged;
 
-        _trayIcon = new TrayIconController();
+        _trayIcon = new TrayIconController(_options.AdditionalMenuItems);
         _trayIcon.OpenLoginRequested += (_, _) => ShowLoginWindow();
         _trayIcon.OpenSettingsRequested += (_, _) => ShowSettingsWindow();
         _trayIcon.ExitRequested += (_, _) => Shutdown();
@@ -109,6 +109,25 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         {
             string who = string.IsNullOrEmpty(redemption.UserName) ? redemption.UserLogin : redemption.UserName;
             _trayIcon.ShowBalloon(redemption.RewardTitle, $"Redeemed by {who}");
+
+            try
+            {
+                _options.OnBotEvent?.Invoke(new BotEventArgs(
+                    "redemption.received",
+                    new Dictionary<string, string?>
+                    {
+                        ["rewardId"] = redemption.RewardId,
+                        ["rewardTitle"] = redemption.RewardTitle,
+                        ["userLogin"] = redemption.UserLogin,
+                        ["userName"] = redemption.UserName,
+                        ["userInput"] = redemption.UserInput,
+                        ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
+                    }));
+            }
+            catch (Exception)
+            {
+                // Host-supplied callback — don't let it take down the shared tray process.
+            }
         });
     }
 

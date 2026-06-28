@@ -15,11 +15,31 @@ internal sealed class TrayIconController : IDisposable
     public event EventHandler? OpenSettingsRequested;
     public event EventHandler? ExitRequested;
 
-    public TrayIconController()
+    public TrayIconController(IReadOnlyList<TrayMenuItem>? additionalMenuItems = null)
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Login / Account", null, (_, _) => OpenLoginRequested?.Invoke(this, EventArgs.Empty));
         menu.Items.Add("Settings", null, (_, _) => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
+
+        if (additionalMenuItems is { Count: > 0 })
+        {
+            menu.Items.Add(new ToolStripSeparator());
+            foreach (TrayMenuItem item in additionalMenuItems)
+            {
+                menu.Items.Add(item.Text, null, (_, _) =>
+                {
+                    try
+                    {
+                        item.OnClick();
+                    }
+                    catch (Exception)
+                    {
+                        // Host-supplied callback — don't let it take down the shared tray process.
+                    }
+                });
+            }
+        }
+
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
 
