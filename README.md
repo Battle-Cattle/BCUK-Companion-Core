@@ -87,9 +87,12 @@ CompanionTrayApplication.Run(new CompanionTrayAppOptions
 ```
 
 - `OnBotEvent` is invoked on the UI thread whenever the bot host reports an
-  event (currently: a channel-point redemption). `BotEventArgs.EventName`
-  is the redeem name; `Metadata` carries `rewardId`, `userLogin`,
-  `userName`, `userInput`, and `redeemedAt`.
+  event. `BotEventArgs.EventName` is a stable identifier for the kind of
+  event (currently only `"redemption.received"`, for a channel-point
+  redemption) — branch on it rather than on any display text, since Core
+  may add more event kinds over time. `Metadata` carries the event's
+  details: for `"redemption.received"` that's `rewardId`, `rewardTitle`,
+  `userLogin`, `userName`, `userInput`, and `redeemedAt`.
 - `AdditionalMenuItems` are appended to the shared tray icon's context
   menu (above "Exit"), so a companion app can surface its own settings
   window from the existing tray icon instead of a command-line flag.

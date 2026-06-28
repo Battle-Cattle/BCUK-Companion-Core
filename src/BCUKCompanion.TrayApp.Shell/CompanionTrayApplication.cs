@@ -113,10 +113,11 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             try
             {
                 _options.OnBotEvent?.Invoke(new BotEventArgs(
-                    redemption.RewardTitle,
+                    "redemption.received",
                     new Dictionary<string, string?>
                     {
                         ["rewardId"] = redemption.RewardId,
+                        ["rewardTitle"] = redemption.RewardTitle,
                         ["userLogin"] = redemption.UserLogin,
                         ["userName"] = redemption.UserName,
                         ["userInput"] = redemption.UserInput,
