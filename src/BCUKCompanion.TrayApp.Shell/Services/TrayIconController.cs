@@ -26,7 +26,17 @@ internal sealed class TrayIconController : IDisposable
             menu.Items.Add(new ToolStripSeparator());
             foreach (TrayMenuItem item in additionalMenuItems)
             {
-                menu.Items.Add(item.Text, null, (_, _) => item.OnClick());
+                menu.Items.Add(item.Text, null, (_, _) =>
+                {
+                    try
+                    {
+                        item.OnClick();
+                    }
+                    catch (Exception)
+                    {
+                        // Host-supplied callback — don't let it take down the shared tray process.
+                    }
+                });
             }
         }
 
