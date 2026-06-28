@@ -7,7 +7,9 @@ namespace BCUKCompanion.TrayApp.Services;
 internal static class AutoStartService
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    private const string ValueName = "BCUKCompanion";
+    private static string _valueName = "BCUKCompanion";
+
+    public static void Configure(string valueName) => _valueName = valueName;
 
     public static void SetEnabled(bool enabled)
     {
@@ -19,18 +21,18 @@ internal static class AutoStartService
 
         if (enabled)
         {
-            string exePath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "BCUKCompanion.TrayApp.exe");
-            key.SetValue(ValueName, $"\"{exePath}\" --minimized");
+            string exePath = Environment.ProcessPath ?? Environment.GetCommandLineArgs()[0];
+            key.SetValue(_valueName, $"\"{exePath}\" --minimized");
         }
         else
         {
-            key.DeleteValue(ValueName, throwOnMissingValue: false);
+            key.DeleteValue(_valueName, throwOnMissingValue: false);
         }
     }
 
     public static bool IsEnabled()
     {
         using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
-        return key?.GetValue(ValueName) is not null;
+        return key?.GetValue(_valueName) is not null;
     }
 }

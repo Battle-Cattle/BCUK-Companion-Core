@@ -7,11 +7,15 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{A4DE91BA-0E6
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BCUKCompanion.Core", "src\BCUKCompanion.Core\BCUKCompanion.Core.csproj", "{5EB9C845-90B4-48E3-BB74-BE71491918FC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BCUKCompanion.TrayApp", "src\BCUKCompanion.TrayApp\BCUKCompanion.TrayApp.csproj", "{5122D570-C28A-4A1C-85FA-11E381598C09}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BCUKCompanion.TrayApp.Shell", "src\BCUKCompanion.TrayApp.Shell\BCUKCompanion.TrayApp.Shell.csproj", "{5122D570-C28A-4A1C-85FA-11E381598C09}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{DDAE4B56-435F-4FF7-ADBB-0C2899902851}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BCUKCompanion.Core.Tests", "tests\BCUKCompanion.Core.Tests\BCUKCompanion.Core.Tests.csproj", "{D8297B29-96DE-490A-8511-8B476848C3FE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{6F9C2C2C-9C42-4B6F-9C9A-8AA3D1B1A001}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BCUKCompanion.TrayApp.Sample", "samples\BCUKCompanion.TrayApp.Sample\BCUKCompanion.TrayApp.Sample.csproj", "{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -34,10 +38,15 @@ Global
 		{D8297B29-96DE-490A-8511-8B476848C3FE}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D8297B29-96DE-490A-8511-8B476848C3FE}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D8297B29-96DE-490A-8511-8B476848C3FE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{5EB9C845-90B4-48E3-BB74-BE71491918FC} = {A4DE91BA-0E65-4B9F-89B4-AFE00E6EDE3B}
 		{5122D570-C28A-4A1C-85FA-11E381598C09} = {A4DE91BA-0E65-4B9F-89B4-AFE00E6EDE3B}
 		{D8297B29-96DE-490A-8511-8B476848C3FE} = {DDAE4B56-435F-4FF7-ADBB-0C2899902851}
+		{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D} = {6F9C2C2C-9C42-4B6F-9C9A-8AA3D1B1A001}
 	EndGlobalSection
 EndGlobal

@@ -8,10 +8,13 @@ using BCUKCompanion.TrayApp.Views;
 
 namespace BCUKCompanion.TrayApp;
 
-public partial class App : System.Windows.Application
+/// <summary>
+/// The full tray-app shell (single-instance guard, login/settings windows, tray icon,
+/// balloon notifications). Hosts call <see cref="Run"/> from a minimal Program.cs.
+/// </summary>
+public sealed class CompanionTrayApplication : System.Windows.Application
 {
-    private const string SingleInstanceMutexName = "BCUKCompanion.TrayApp.SingleInstance";
-
+    private readonly CompanionTrayAppOptions _options;
     private Mutex? _singleInstanceMutex;
     private AppSettings _settings = null!;
     private CompanionClient _companionClient = null!;
@@ -20,11 +23,26 @@ public partial class App : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private bool _isConnected;
 
+    private CompanionTrayApplication(CompanionTrayAppOptions options)
+    {
+        _options = options;
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+    }
+
+    public new static void Run(CompanionTrayAppOptions? options = null)
+    {
+        var app = new CompanionTrayApplication(options ?? new CompanionTrayAppOptions());
+        ((System.Windows.Application)app).Run();
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out bool createdNew);
+        AppPaths.Configure(_options.DataFolderName);
+        AutoStartService.Configure(_options.DataFolderName);
+
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, $"{_options.DataFolderName}.SingleInstance", out bool createdNew);
         if (!createdNew)
         {
             // Another instance owns the mutex — don't try to release a lock we never acquired.

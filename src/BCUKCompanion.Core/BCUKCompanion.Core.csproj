@@ -8,6 +8,15 @@
     <AssemblyName>BCUKCompanion.Core</AssemblyName>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <PackageId>BCUKCompanion.Core</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Battle Cattle</Authors>
+    <Description>OAuth loopback login, token storage, and SSE event-stream client shared by BCUK Bot companion apps.</Description>
+    <RepositoryUrl>https://github.com/battle-cattle/bcuk-companion-core</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
