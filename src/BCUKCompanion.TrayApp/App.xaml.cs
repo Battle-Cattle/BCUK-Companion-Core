@@ -8,7 +8,7 @@ using BCUKCompanion.TrayApp.Views;
 
 namespace BCUKCompanion.TrayApp;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     private const string SingleInstanceMutexName = "BCUKCompanion.TrayApp.SingleInstance";
 
@@ -30,7 +30,7 @@ public partial class App : Application
             // Another instance owns the mutex — don't try to release a lock we never acquired.
             _singleInstanceMutex.Dispose();
             _singleInstanceMutex = null;
-            MessageBox.Show("BCUK Companion is already running — check your system tray.", "BCUK Companion");
+            System.Windows.MessageBox.Show("BCUK Companion is already running — check your system tray.", "BCUK Companion");
             Shutdown();
             return;
         }
