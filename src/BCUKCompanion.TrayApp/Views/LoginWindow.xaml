@@ -1,0 +1,36 @@
+<Window x:Class="BCUKCompanion.TrayApp.Views.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="BCUK Companion — Login"
+        Width="420" Height="320"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Sign in to BCUK Companion" FontSize="18" FontWeight="Bold" Margin="0,0,0,12" />
+
+        <Button Grid.Row="1" x:Name="LoginWithBrowserButton" Content="Login with Discord (opens browser)"
+                Height="32" Click="LoginWithBrowserButton_Click" />
+
+        <TextBlock Grid.Row="2" Text="— or paste a token from the dashboard's Companion App page —"
+                   Margin="0,16,0,8" TextWrapping="Wrap" Foreground="Gray" />
+
+        <PasswordBox Grid.Row="3" x:Name="TokenBox" Height="28" />
+
+        <Button Grid.Row="4" x:Name="SaveTokenButton" Content="Save Token" Height="32" Margin="0,8,0,0"
+                Click="SaveTokenButton_Click" />
+
+        <TextBlock Grid.Row="5" x:Name="StatusText" Foreground="Red" TextWrapping="Wrap" Margin="0,12,0,0" />
+
+        <TextBlock Grid.Row="6" x:Name="BotHostText" Foreground="Gray" FontSize="11" />
+    </Grid>
+</Window>
