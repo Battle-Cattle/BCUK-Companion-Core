@@ -74,12 +74,20 @@ public class CompanionClientTests
         await loopStarted.Task.WaitAsync(TestTimeout);
 
         var stopwatch = Stopwatch.StartNew();
-        client.StopListening();
-        stopwatch.Stop();
+        try
+        {
+            // Run the call itself on a time-bounded background task: if
+            // StopListening() ever regresses into blocking, this fails fast
+            // with a timeout instead of hanging the test run.
+            await Task.Run(() => client.StopListening()).WaitAsync(TestTimeout);
+            stopwatch.Stop();
 
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"StopListening() took {stopwatch.Elapsed}, expected it to return immediately.");
-
-        loopRelease.TrySetResult();
+            Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"StopListening() took {stopwatch.Elapsed}, expected it to return immediately.");
+        }
+        finally
+        {
+            loopRelease.TrySetResult();
+        }
     }
 
     [Fact]
@@ -155,8 +163,16 @@ public class CompanionClientTests
         client.StartListening();
         await firstLoopStarted.Task.WaitAsync(TestTimeout);
 
-        client.StartListening();
-        firstLoopRelease.TrySetResult();
+        try
+        {
+            // Same as above: bound the restart call itself so a regression
+            // that makes it block fails fast instead of hanging the test.
+            await Task.Run(() => client.StartListening()).WaitAsync(TestTimeout);
+        }
+        finally
+        {
+            firstLoopRelease.TrySetResult();
+        }
 
         await secondLoopStarted.Task.WaitAsync(TestTimeout);
 
@@ -206,8 +222,7 @@ public class CompanionClientTests
 
         client.StopListening();
 
-        // Give the canceled loop a beat to unwind and (not) raise the event.
-        await Task.Delay(TimeSpan.FromMilliseconds(200));
+        await client.CurrentLoopTask.WaitAsync(TestTimeout);
 
         Assert.False(faulted);
     }

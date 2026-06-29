@@ -42,6 +42,13 @@ public sealed class CompanionClient : IDisposable
     // of the real Events.RunAsync, without standing up an HTTP server.
     internal Func<string, CancellationToken, Task>? ListenLoopOverride { get; set; }
 
+    // Test seam: lets tests await "the loop has fully unwound, including any
+    // ListenLoopFaulted dispatch" deterministically, without a fixed sleep.
+    internal Task CurrentLoopTask
+    {
+        get { lock (_lifecycleLock) { return _eventLoopTask; } }
+    }
+
     public CompanionClient(Uri botHost, ITokenStore tokenStore, HttpClient? httpClient = null)
     {
         _tokenStore = tokenStore;
@@ -97,7 +104,12 @@ public sealed class CompanionClient : IDisposable
             Task previousLoop = CancelCurrentLoopLocked();
             var cts = new CancellationTokenSource();
             _eventLoopCts = cts;
-            _eventLoopTask = RunAfterPreviousAsync(previousLoop, token, cts.Token);
+            // Task.Run forces a real async boundary so the field writes above are
+            // guaranteed to be visible (and the lock released) before any loop body
+            // code -- including a synchronous ConnectionStateChanged dispatch -- runs.
+            // Without this, a reentrant StartListening()/StopListening() call from
+            // inside that dispatch could run while this method is still on the stack.
+            _eventLoopTask = Task.Run(() => RunAfterPreviousAsync(previousLoop, token, cts));
         }
     }
 
@@ -122,12 +134,11 @@ public sealed class CompanionClient : IDisposable
     private Task CancelCurrentLoopLocked()
     {
         _eventLoopCts?.Cancel();
-        _eventLoopCts?.Dispose();
         _eventLoopCts = null;
         return _eventLoopTask;
     }
 
-    private async Task RunAfterPreviousAsync(Task previousLoop, string token, CancellationToken cancellationToken)
+    private async Task RunAfterPreviousAsync(Task previousLoop, string token, CancellationTokenSource cts)
     {
         try
         {
@@ -142,15 +153,36 @@ public sealed class CompanionClient : IDisposable
 
         try
         {
-            await (ListenLoopOverride ?? Events.RunAsync)(token, cancellationToken).ConfigureAwait(false);
+            await (ListenLoopOverride ?? Events.RunAsync)(token, cts.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
             // Expected: StopListening() or a restart canceled this loop.
         }
         catch (Exception ex)
         {
             ListenLoopFaulted?.Invoke(this, ex);
+        }
+        finally
+        {
+            lock (_lifecycleLock)
+            {
+                // If this loop exited on its own (fault or, hypothetically, a
+                // clean return) rather than via StopListening()/a restart, the
+                // field still points at this cts -- clear it so a later
+                // StopListening() doesn't try to Cancel() what we're about to
+                // dispose below.
+                if (ReferenceEquals(_eventLoopCts, cts))
+                {
+                    _eventLoopCts = null;
+                }
+            }
+
+            // Deferred until the loop has genuinely exited -- disposing eagerly in
+            // CancelCurrentLoopLocked() could race with this loop still registering
+            // callbacks against cts.Token (e.g. inside Task.Delay), which would throw
+            // ObjectDisposedException instead of observing cancellation.
+            cts.Dispose();
         }
     }
 
