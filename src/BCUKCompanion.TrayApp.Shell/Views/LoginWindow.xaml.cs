@@ -6,15 +6,55 @@ namespace BCUKCompanion.TrayApp.Views;
 
 public partial class LoginWindow : Window
 {
-    private readonly CompanionClient _companionClient;
+    private CompanionClient _companionClient;
+    private bool _isBusy;
 
     public event EventHandler? LoginSucceeded;
+
+    /// <summary>Raised when the user changes the server URL from this window, before any login attempt.</summary>
+    public event EventHandler<string>? ServerHostChanged;
 
     public LoginWindow(CompanionClient companionClient, string botHost)
     {
         _companionClient = companionClient;
         InitializeComponent();
-        BotHostText.Text = $"Server: {botHost}";
+        ServerHostBox.Text = botHost;
+    }
+
+    /// <summary>Re-points this still-open window at a companion client created for a newly saved bot host.</summary>
+    internal void UpdateCompanionClient(CompanionClient companionClient, string botHost)
+    {
+        _companionClient = companionClient;
+        ServerHostBox.Text = botHost;
+    }
+
+    private void ChangeServerButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isBusy)
+        {
+            ServerStatusText.Text = "Wait for the current login attempt to finish before changing server.";
+            return;
+        }
+
+        string newBotHost = ServerHostBox.Text.Trim();
+        if (!Uri.TryCreate(newBotHost, UriKind.Absolute, out Uri? parsedHost)
+            || (parsedHost.Scheme != Uri.UriSchemeHttp && parsedHost.Scheme != Uri.UriSchemeHttps))
+        {
+            ServerStatusText.Text = "Enter a valid http(s) server URL.";
+            return;
+        }
+
+        try
+        {
+            ServerHostChanged?.Invoke(this, newBotHost);
+        }
+        catch (Exception ex)
+        {
+            ServerStatusText.Text = $"Couldn't update server: {ex.Message}";
+            return;
+        }
+
+        ServerStatusText.Text = "Server updated. No connection has been made yet.";
     }
 
     private async void LoginWithBrowserButton_Click(object sender, RoutedEventArgs e)
@@ -67,8 +107,11 @@ public partial class LoginWindow : Window
 
     private void SetBusy(bool busy, string status)
     {
+        _isBusy = busy;
         LoginWithBrowserButton.IsEnabled = !busy;
         SaveTokenButton.IsEnabled = !busy;
+        ServerHostBox.IsEnabled = !busy;
+        ChangeServerButton.IsEnabled = !busy;
         StatusText.Text = status;
     }
 }
