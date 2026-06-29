@@ -15,12 +15,39 @@ public sealed class CompanionClient : IDisposable
     private readonly ITokenStore _tokenStore;
     private readonly LoopbackOAuthClient _oauthClient;
 
+    // Guards _eventLoopCts/_eventLoopTask. Only ever held across plain field
+    // reads/writes -- never across an await or a wait on a task -- so it's
+    // safe to take even when called from inside a ConnectionStateChanged or
+    // RedemptionReceived handler that's running on the listen loop's own call
+    // stack.
+    private readonly object _lifecycleLock = new();
     private CancellationTokenSource? _eventLoopCts;
-    private Task? _eventLoopTask;
+    private Task _eventLoopTask = Task.CompletedTask;
 
     public CompanionEventStream Events { get; }
 
     public bool IsLoggedIn => _tokenStore.Load() is not null;
+
+    /// <summary>
+    /// Raised when the background listen loop ends because
+    /// <see cref="CompanionEventStream.RunAsync"/> threw an exception, as
+    /// opposed to ending because <see cref="StopListening"/> (or a restart
+    /// via <see cref="StartListening"/>) canceled it. Subscribe to this to
+    /// observe and react to listen-loop failures instead of having them go
+    /// silently unobserved.
+    /// </summary>
+    public event EventHandler<Exception>? ListenLoopFaulted;
+
+    // Test seam: lets unit tests substitute a controllable fake loop instead
+    // of the real Events.RunAsync, without standing up an HTTP server.
+    internal Func<string, CancellationToken, Task>? ListenLoopOverride { get; set; }
+
+    // Test seam: lets tests await "the loop has fully unwound, including any
+    // ListenLoopFaulted dispatch" deterministically, without a fixed sleep.
+    internal Task CurrentLoopTask
+    {
+        get { lock (_lifecycleLock) { return _eventLoopTask; } }
+    }
 
     public CompanionClient(Uri botHost, ITokenStore tokenStore, HttpClient? httpClient = null)
     {
@@ -56,7 +83,14 @@ public sealed class CompanionClient : IDisposable
         _tokenStore.Clear();
     }
 
-    /// <summary>Starts (or restarts) the background SSE listen loop using the saved token.</summary>
+    /// <summary>
+    /// Starts (or restarts) the background SSE listen loop using the saved
+    /// token. Returns immediately without blocking: the previous loop (if
+    /// any) is canceled and guaranteed to fully unwind before the new loop's
+    /// first connection attempt runs, so listen loops never overlap. Safe to
+    /// call from inside a <see cref="CompanionEventStream.RedemptionReceived"/>
+    /// or <see cref="CompanionEventStream.ConnectionStateChanged"/> handler.
+    /// </summary>
     public void StartListening()
     {
         string? token = _tokenStore.Load();
@@ -65,25 +99,91 @@ public sealed class CompanionClient : IDisposable
             throw new InvalidOperationException("No companion token saved — log in first.");
         }
 
-        StopListening();
-        _eventLoopCts = new CancellationTokenSource();
-        _eventLoopTask = Events.RunAsync(token, _eventLoopCts.Token);
-
-        // RunAsync isn't awaited by any caller — observe faults here so they
-        // don't surface later as unobserved task exceptions.
-        _eventLoopTask.ContinueWith(
-            static t => _ = t.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted,
-            TaskScheduler.Default);
+        lock (_lifecycleLock)
+        {
+            Task previousLoop = CancelCurrentLoopLocked();
+            var cts = new CancellationTokenSource();
+            _eventLoopCts = cts;
+            // Task.Run forces a real async boundary so the field writes above are
+            // guaranteed to be visible (and the lock released) before any loop body
+            // code -- including a synchronous ConnectionStateChanged dispatch -- runs.
+            // Without this, a reentrant StartListening()/StopListening() call from
+            // inside that dispatch could run while this method is still on the stack.
+            _eventLoopTask = Task.Run(() => RunAfterPreviousAsync(previousLoop, token, cts));
+        }
     }
 
+    /// <summary>
+    /// Requests that the current listen loop stop. Only signals cancellation
+    /// and returns immediately -- it never waits for the loop to finish
+    /// unwinding -- so it's safe to call from inside a
+    /// <see cref="CompanionEventStream.RedemptionReceived"/> or
+    /// <see cref="CompanionEventStream.ConnectionStateChanged"/> handler
+    /// without risking a deadlock. Subscribe to <see cref="ListenLoopFaulted"/>
+    /// to observe whether the loop being stopped ended in failure.
+    /// </summary>
     public void StopListening()
     {
+        lock (_lifecycleLock)
+        {
+            CancelCurrentLoopLocked();
+        }
+    }
+
+    /// <summary>Must be called while holding <see cref="_lifecycleLock"/>.</summary>
+    private Task CancelCurrentLoopLocked()
+    {
         _eventLoopCts?.Cancel();
-        _eventLoopCts?.Dispose();
         _eventLoopCts = null;
-        _eventLoopTask = null;
+        return _eventLoopTask;
+    }
+
+    private async Task RunAfterPreviousAsync(Task previousLoop, string token, CancellationTokenSource cts)
+    {
+        try
+        {
+            await previousLoop.ConfigureAwait(false);
+        }
+        catch
+        {
+            // The previous loop's own failure (if any) was already surfaced
+            // via ListenLoopFaulted while it was running; nothing further to
+            // observe here -- we're only waiting for it to fully unwind.
+        }
+
+        try
+        {
+            await (ListenLoopOverride ?? Events.RunAsync)(token, cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // Expected: StopListening() or a restart canceled this loop.
+        }
+        catch (Exception ex)
+        {
+            ListenLoopFaulted?.Invoke(this, ex);
+        }
+        finally
+        {
+            lock (_lifecycleLock)
+            {
+                // If this loop exited on its own (fault or, hypothetically, a
+                // clean return) rather than via StopListening()/a restart, the
+                // field still points at this cts -- clear it so a later
+                // StopListening() doesn't try to Cancel() what we're about to
+                // dispose below.
+                if (ReferenceEquals(_eventLoopCts, cts))
+                {
+                    _eventLoopCts = null;
+                }
+            }
+
+            // Deferred until the loop has genuinely exited -- disposing eagerly in
+            // CancelCurrentLoopLocked() could race with this loop still registering
+            // callbacks against cts.Token (e.g. inside Task.Delay), which would throw
+            // ObjectDisposedException instead of observing cancellation.
+            cts.Dispose();
+        }
     }
 
     public void Dispose()
