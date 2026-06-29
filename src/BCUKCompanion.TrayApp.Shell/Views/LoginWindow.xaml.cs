@@ -7,6 +7,7 @@ namespace BCUKCompanion.TrayApp.Views;
 public partial class LoginWindow : Window
 {
     private CompanionClient _companionClient;
+    private bool _isBusy;
 
     public event EventHandler? LoginSucceeded;
 
@@ -29,6 +30,12 @@ public partial class LoginWindow : Window
 
     private void ChangeServerButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_isBusy)
+        {
+            ServerStatusText.Text = "Wait for the current login attempt to finish before changing server.";
+            return;
+        }
+
         string newBotHost = ServerHostBox.Text.Trim();
         if (!Uri.TryCreate(newBotHost, UriKind.Absolute, out Uri? parsedHost)
             || (parsedHost.Scheme != Uri.UriSchemeHttp && parsedHost.Scheme != Uri.UriSchemeHttps))
@@ -37,7 +44,16 @@ public partial class LoginWindow : Window
             return;
         }
 
-        ServerHostChanged?.Invoke(this, newBotHost);
+        try
+        {
+            ServerHostChanged?.Invoke(this, newBotHost);
+        }
+        catch (Exception ex)
+        {
+            ServerStatusText.Text = $"Couldn't update server: {ex.Message}";
+            return;
+        }
+
         ServerStatusText.Text = "Server updated. No connection has been made yet.";
     }
 
@@ -91,8 +107,11 @@ public partial class LoginWindow : Window
 
     private void SetBusy(bool busy, string status)
     {
+        _isBusy = busy;
         LoginWithBrowserButton.IsEnabled = !busy;
         SaveTokenButton.IsEnabled = !busy;
+        ServerHostBox.IsEnabled = !busy;
+        ChangeServerButton.IsEnabled = !busy;
         StatusText.Text = status;
     }
 }

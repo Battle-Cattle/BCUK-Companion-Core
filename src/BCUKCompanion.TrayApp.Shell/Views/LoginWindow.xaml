@@ -40,8 +40,11 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <TextBox Grid.Column="0" x:Name="ServerHostBox" Height="26" Margin="0,0,8,0" />
-            <Button Grid.Column="1" x:Name="ChangeServerButton" Content="Change" Width="70" Click="ChangeServerButton_Click" />
+            <TextBox Grid.Column="0" x:Name="ServerHostBox" Height="26" Margin="0,0,8,0"
+                     AutomationProperties.Name="Server URL" />
+            <Button Grid.Column="1" x:Name="ChangeServerButton" Content="Change" Width="70"
+                    AutomationProperties.Name="Change server URL"
+                    Click="ChangeServerButton_Click" />
         </Grid>
 
         <TextBlock Grid.Row="8" x:Name="ServerStatusText" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" />
