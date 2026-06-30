@@ -18,6 +18,11 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
 
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException($"Event action JSON must be a JSON object, got {root.ValueKind}.");
+        }
+
         if (!root.TryGetProperty(KindPropertyName, out var kindElement) || kindElement.GetString() is not { } kind)
         {
             throw new JsonException($"Event action JSON is missing a \"{KindPropertyName}\" discriminator.");

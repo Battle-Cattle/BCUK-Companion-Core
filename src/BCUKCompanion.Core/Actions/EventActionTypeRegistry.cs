@@ -19,6 +19,16 @@ public sealed class EventActionTypeRegistry
 
     public void Register(string kind, Type actionType)
     {
+        if (string.IsNullOrWhiteSpace(kind))
+        {
+            throw new ArgumentException("Action kind must not be null or whitespace.", nameof(kind));
+        }
+
+        if (kindToType.ContainsKey(kind))
+        {
+            throw new ArgumentException($"Action kind \"{kind}\" is already registered.", nameof(kind));
+        }
+
         if (!actionType.IsClass || actionType.IsAbstract || !typeof(IEventAction).IsAssignableFrom(actionType))
         {
             throw new ArgumentException($"{actionType} must be a concrete class that implements {nameof(IEventAction)}.", nameof(actionType));
@@ -29,5 +39,5 @@ public sealed class EventActionTypeRegistry
 
     public bool TryGetType(string kind, out Type actionType) => kindToType.TryGetValue(kind, out actionType!);
 
-    public IReadOnlyDictionary<string, Type> RegisteredKinds => kindToType;
+    public IReadOnlyDictionary<string, Type> RegisteredKinds => kindToType.AsReadOnly();
 }

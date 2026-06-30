@@ -31,12 +31,18 @@ public sealed class EventActionDispatcher(
     public async Task<EventDispatchResult> DispatchAsync(string rewardTitle, CancellationToken cancellationToken = default)
     {
         var mappings = mappingsProvider();
-        var context = contextProvider();
 
         var actions = mappings
             .Where(m => string.Equals(m.RewardTitle, rewardTitle, StringComparison.OrdinalIgnoreCase))
             .SelectMany(m => m.Actions)
             .ToList();
+
+        if (actions.Count == 0)
+        {
+            return new EventDispatchResult(rewardTitle, []);
+        }
+
+        var context = contextProvider();
 
         // Sequential, not parallel: a Delay action only delays the actions queued after it.
         var results = new List<EventActionResult>(actions.Count);

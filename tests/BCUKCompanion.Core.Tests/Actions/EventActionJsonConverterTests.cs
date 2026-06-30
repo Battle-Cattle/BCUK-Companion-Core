@@ -104,6 +104,18 @@ public class EventActionJsonConverterTests
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<IEventAction>("""{"DelaySeconds":5}""", options));
     }
 
+    [Theory]
+    [InlineData("[1,2,3]")]
+    [InlineData("\"delay\"")]
+    [InlineData("42")]
+    public void Read_NonObjectJson_ThrowsJsonException(string json)
+    {
+        var registry = new EventActionTypeRegistry();
+        var options = CreateOptions(registry);
+
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<IEventAction>(json, options));
+    }
+
     [Fact]
     public void RoundTrips_EventActionMappingWithMixedActionKinds()
     {
