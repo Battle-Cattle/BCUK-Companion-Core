@@ -16,17 +16,16 @@ public sealed class EventActionDispatcher(
     private const string RedemptionEventName = "redemption.received";
     private const string RewardTitleMetadataKey = "rewardTitle";
 
-    public Task<EventDispatchResult?> DispatchAsync(BotEventArgs botEvent, CancellationToken cancellationToken = default)
+    public async Task<EventDispatchResult?> DispatchAsync(BotEventArgs botEvent, CancellationToken cancellationToken = default)
     {
         if (botEvent.EventName != RedemptionEventName
             || !botEvent.Metadata.TryGetValue(RewardTitleMetadataKey, out var rewardTitle)
             || string.IsNullOrEmpty(rewardTitle))
         {
-            return Task.FromResult<EventDispatchResult?>(null);
+            return null;
         }
 
-        return DispatchAsync(rewardTitle, cancellationToken).ContinueWith(
-            t => (EventDispatchResult?)t.Result, cancellationToken, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+        return await DispatchAsync(rewardTitle, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<EventDispatchResult> DispatchAsync(string rewardTitle, CancellationToken cancellationToken = default)
@@ -62,6 +61,10 @@ public sealed class EventActionDispatcher(
 
             var success = await action.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
             return new EventActionResult(action, success, success ? null : "Action did not complete successfully.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

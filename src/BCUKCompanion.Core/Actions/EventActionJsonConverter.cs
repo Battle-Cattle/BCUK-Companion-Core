@@ -41,6 +41,10 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
         using var doc = JsonSerializer.SerializeToDocument(value, value.GetType(), options);
         foreach (var property in doc.RootElement.EnumerateObject())
         {
+            if (string.Equals(property.Name, KindPropertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             property.WriteTo(writer);
         }
 

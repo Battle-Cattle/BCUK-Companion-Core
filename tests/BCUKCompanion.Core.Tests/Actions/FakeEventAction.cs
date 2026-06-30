@@ -17,6 +17,8 @@ internal sealed class FakeEventAction(
 
     public Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (throwOnExecute is not null)
         {
             throw throwOnExecute;
