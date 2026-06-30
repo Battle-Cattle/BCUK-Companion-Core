@@ -19,9 +19,9 @@ public sealed class EventActionTypeRegistry
 
     public void Register(string kind, Type actionType)
     {
-        if (!typeof(IEventAction).IsAssignableFrom(actionType))
+        if (!actionType.IsClass || actionType.IsAbstract || !typeof(IEventAction).IsAssignableFrom(actionType))
         {
-            throw new ArgumentException($"{actionType} does not implement {nameof(IEventAction)}.", nameof(actionType));
+            throw new ArgumentException($"{actionType} must be a concrete class that implements {nameof(IEventAction)}.", nameof(actionType));
         }
 
         kindToType[kind] = actionType;

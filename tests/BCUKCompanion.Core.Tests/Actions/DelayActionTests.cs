@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BCUKCompanion.Core.Actions;
 using Xunit;
 
@@ -31,12 +32,12 @@ public class DelayActionTests
     public async Task ExecuteAsync_DelaysApproximatelyRequestedDuration()
     {
         var action = new DelayAction { DelaySeconds = 1 };
-        var start = DateTime.UtcNow;
+        var sw = Stopwatch.StartNew();
 
         var success = await action.ExecuteAsync(Context, CancellationToken.None);
 
         Assert.True(success);
-        Assert.True(DateTime.UtcNow - start >= TimeSpan.FromMilliseconds(900));
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(900));
     }
 
     [Fact]

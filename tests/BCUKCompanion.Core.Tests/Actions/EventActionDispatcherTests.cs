@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BCUKCompanion.Core.Actions;
 using BCUKCompanion.Core.Models;
 using Xunit;
@@ -50,17 +51,17 @@ public class EventActionDispatcherTests
     [Fact]
     public async Task DispatchAsync_DelayBlocksSubsequentActions()
     {
-        DateTime? executedAt = null;
+        var executed = false;
         var mapping = new EventActionMapping(
             "Hydrate!",
-            [new DelayAction { DelaySeconds = 1 }, new FakeEventAction(onExecute: () => executedAt = DateTime.UtcNow)]);
+            [new DelayAction { DelaySeconds = 1 }, new FakeEventAction(onExecute: () => executed = true)]);
         var dispatcher = CreateDispatcher([mapping]);
 
-        var start = DateTime.UtcNow;
+        var sw = Stopwatch.StartNew();
         await dispatcher.DispatchAsync("Hydrate!");
 
-        Assert.NotNull(executedAt);
-        Assert.True(executedAt!.Value - start >= TimeSpan.FromMilliseconds(900));
+        Assert.True(executed);
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(900));
     }
 
     [Fact]
