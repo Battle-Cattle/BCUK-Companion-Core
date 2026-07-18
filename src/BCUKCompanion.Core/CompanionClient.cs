@@ -120,7 +120,9 @@ public sealed class CompanionClient : IDisposable
         try
         {
             using JsonDocument document = JsonDocument.Parse(body);
-            if (document.RootElement.TryGetProperty("error", out JsonElement errorElement))
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("error", out JsonElement errorElement)
+                && errorElement.ValueKind == JsonValueKind.String)
             {
                 return errorElement.GetString();
             }

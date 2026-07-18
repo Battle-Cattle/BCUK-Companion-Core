@@ -101,6 +101,7 @@ public class GetRewardsAsyncTests
         CompanionAuthException ex = await Assert.ThrowsAsync<CompanionAuthException>(() => client.GetRewardsAsync());
 
         Assert.Equal(401, ex.StatusCode);
+        Assert.Equal("Unauthorized", ex.Message);
     }
 
     [Fact]
