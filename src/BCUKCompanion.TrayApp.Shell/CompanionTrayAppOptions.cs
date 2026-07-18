@@ -1,3 +1,4 @@
+using BCUKCompanion.Core;
 using BCUKCompanion.Core.Models;
 
 namespace BCUKCompanion.TrayApp;
@@ -24,4 +25,12 @@ public sealed class CompanionTrayAppOptions
     /// its own settings UI (or any other action) from the shared tray icon.
     /// </summary>
     public IReadOnlyList<TrayMenuItem>? AdditionalMenuItems { get; init; }
+
+    /// <summary>
+    /// Invoked on the UI thread whenever the shell's <see cref="CompanionClient"/> instance is
+    /// created or replaced (e.g. after a bot-host change in Settings), so a companion app can
+    /// make its own on-demand calls against it — such as <see cref="CompanionClient.GetRewardsAsync"/>
+    /// to populate a reward picker — without owning any login/connection lifecycle itself.
+    /// </summary>
+    public Action<CompanionClient>? OnClientReady { get; init; }
 }

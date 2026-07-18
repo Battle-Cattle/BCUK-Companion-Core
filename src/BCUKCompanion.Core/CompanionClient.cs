@@ -1,5 +1,10 @@
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using BCUKCompanion.Core.Auth;
 using BCUKCompanion.Core.Events;
+using BCUKCompanion.Core.Models;
 using BCUKCompanion.Core.Tokens;
 
 namespace BCUKCompanion.Core;
@@ -12,6 +17,7 @@ public sealed class CompanionClient : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly Uri _botHost;
     private readonly ITokenStore _tokenStore;
     private readonly LoopbackOAuthClient _oauthClient;
 
@@ -54,8 +60,89 @@ public sealed class CompanionClient : IDisposable
         _tokenStore = tokenStore;
         _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient();
+        _botHost = botHost;
         _oauthClient = new LoopbackOAuthClient(_httpClient, botHost);
         Events = new CompanionEventStream(_httpClient, botHost);
+    }
+
+    /// <summary>
+    /// Fetches the current list of Twitch channel-point custom rewards from
+    /// GET /api/companion/rewards. The server does not filter out paused rewards, so
+    /// callers that only want active ones should filter on <see cref="Reward.IsEnabled"/>
+    /// themselves. There's no server-side caching, so avoid polling this aggressively —
+    /// it's meant for app-start or occasional refreshes, not real-time updates (use
+    /// <see cref="Events"/> for that).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
+    public async Task<IReadOnlyList<Reward>> GetRewardsAsync(CancellationToken cancellationToken = default)
+    {
+        string? token = _tokenStore.Load();
+        if (token is null)
+        {
+            throw new InvalidOperationException("No companion token saved — log in first.");
+        }
+
+        var requestUri = new Uri(_botHost, "/api/companion/rewards");
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new CompanionAuthException(TryExtractError(body) ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            string message = TryExtractError(body) ?? $"Fetching rewards failed with status {(int)response.StatusCode}.";
+            throw new CompanionApiException(message, (int)response.StatusCode);
+        }
+
+        RewardsResponse? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<RewardsResponse>(body);
+        }
+        catch (JsonException)
+        {
+            throw new CompanionApiException("Rewards response was not valid JSON.", (int)response.StatusCode);
+        }
+
+        return (IReadOnlyList<Reward>?)parsed?.Rewards ?? Array.Empty<Reward>();
+    }
+
+    private static string? TryExtractError(string body)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("error", out JsonElement errorElement))
+            {
+                return errorElement.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON — fall through to the generic message.
+        }
+
+        return null;
+    }
+
+    private sealed class RewardsResponse
+    {
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+
+        [JsonPropertyName("rewards")]
+        public List<Reward>? Rewards { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
     }
 
     /// <summary>Runs the loopback OAuth login flow (Option A) and saves the resulting token.</summary>
