@@ -149,6 +149,16 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         var client = new CompanionClient(botHost, new DpapiFileTokenStore(AppPaths.TokenFile));
         client.Events.RedemptionReceived += OnRedemptionReceived;
         client.Events.ConnectionStateChanged += OnConnectionStateChanged;
+
+        try
+        {
+            _options.OnClientReady?.Invoke(client);
+        }
+        catch (Exception)
+        {
+            // Host-supplied callback — don't let it take down the shared tray process.
+        }
+
         return client;
     }
 
