@@ -115,6 +115,66 @@ public sealed class CompanionClient : IDisposable
         return (IReadOnlyList<Reward>?)parsed?.Rewards ?? Array.Empty<Reward>();
     }
 
+    /// <summary>
+    /// Fetches streamer activity events (follow/sub/resub/giftsub/raid — no redemptions)
+    /// missed while disconnected, from GET /api/companion/events/recent. Meant for a
+    /// one-off catch-up call; <see cref="Events"/> already backfills this automatically
+    /// on every (re)connect, so most callers won't need to call this directly.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
+    public async Task<IReadOnlyList<CompanionActivityEvent>> GetRecentActivityEventsAsync(CancellationToken cancellationToken = default)
+    {
+        string? token = _tokenStore.Load();
+        if (token is null)
+        {
+            throw new InvalidOperationException("No companion token saved — log in first.");
+        }
+
+        var requestUri = new Uri(_botHost, "/api/companion/events/recent");
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            throw new CompanionAuthException(TryExtractError(body) ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            string message = TryExtractError(body) ?? $"Fetching recent activity failed with status {(int)response.StatusCode}.";
+            throw new CompanionApiException(message, (int)response.StatusCode);
+        }
+
+        RecentActivityResponse? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<RecentActivityResponse>(body);
+        }
+        catch (JsonException)
+        {
+            throw new CompanionApiException("Recent activity response was not valid JSON.", (int)response.StatusCode);
+        }
+
+        return (IReadOnlyList<CompanionActivityEvent>?)parsed?.Events ?? Array.Empty<CompanionActivityEvent>();
+    }
+
+    private sealed class RecentActivityResponse
+    {
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+
+        [JsonPropertyName("events")]
+        public List<CompanionActivityEvent>? Events { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
+    }
+
     private static string? TryExtractError(string body)
     {
         try

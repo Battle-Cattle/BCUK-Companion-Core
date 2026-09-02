@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using BCUKCompanion.Core.Models;
 using System.Linq;
 
@@ -17,7 +18,16 @@ public sealed class CompanionEventStream
     private readonly HttpClient _httpClient;
     private readonly Uri _botHost;
 
+    private static readonly HashSet<string> ActivityEventTypes =
+        new(StringComparer.Ordinal) { "follow", "sub", "resub", "giftsub", "raid" };
+
+    // Watermark of the newest activity event already surfaced (live or backfilled),
+    // so a post-reconnect backfill from GET /api/companion/events/recent doesn't
+    // re-raise ActivityReceived for events already delivered live before the drop.
+    private DateTimeOffset _lastActivitySeenAt = DateTimeOffset.MinValue;
+
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
+    public event EventHandler<CompanionActivityEvent>? ActivityReceived;
     public event EventHandler<CompanionConnectionState>? ConnectionStateChanged;
 
     public CompanionEventStream(HttpClient httpClient, Uri botHost)
@@ -111,6 +121,11 @@ public sealed class CompanionEventStream
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connected);
             ResetIdleTimer(idleCts);
 
+            // The server unilaterally closes SSE connections on token revoke/reissue,
+            // and SSE itself sends no backfill -- so every (re)connect, fetch activity
+            // missed while disconnected before entering the live read loop.
+            await FetchRecentActivityAsync(token, linkedCts.Token).ConfigureAwait(false);
+
             try
             {
                 await using Stream stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
@@ -149,10 +164,89 @@ public sealed class CompanionEventStream
         }
     }
 
+    /// <summary>
+    /// Best-effort fetch of activity events missed while disconnected, via
+    /// GET /api/companion/events/recent. Filters out anything at or before
+    /// <see cref="_lastActivitySeenAt"/> so events already delivered live
+    /// aren't re-raised, then advances the watermark. Errors are swallowed —
+    /// this must never fail the connection attempt itself.
+    /// </summary>
+    private async Task FetchRecentActivityAsync(string token, CancellationToken cancellationToken)
+    {
+        var requestUri = new Uri(_botHost, "/api/companion/events/recent");
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        List<CompanionActivityEvent>? events;
+        try
+        {
+            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return;
+            }
+
+            string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            events = JsonSerializer.Deserialize<RecentActivityResponse>(body)?.Events;
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (events is null)
+        {
+            return;
+        }
+
+        foreach (CompanionActivityEvent activity in events.Where(e => e.OccurredAt > _lastActivitySeenAt).OrderBy(e => e.OccurredAt))
+        {
+            _lastActivitySeenAt = activity.OccurredAt;
+            ActivityReceived?.Invoke(this, activity);
+        }
+    }
+
     private void HandleEvent(SseEvent sseEvent)
     {
         if (string.IsNullOrWhiteSpace(sseEvent.Data))
         {
+            return;
+        }
+
+        string? type = TryReadType(sseEvent.Data);
+        if (type is null)
+        {
+            return;
+        }
+
+        if (ActivityEventTypes.Contains(type))
+        {
+            CompanionActivityEvent? activity;
+            try
+            {
+                activity = JsonSerializer.Deserialize<CompanionActivityEvent>(sseEvent.Data);
+            }
+            catch (JsonException)
+            {
+                return;
+            }
+
+            if (activity is not null && !string.IsNullOrWhiteSpace(activity.DisplayName) && activity.OccurredAt != default)
+            {
+                if (activity.OccurredAt > _lastActivitySeenAt)
+                {
+                    _lastActivitySeenAt = activity.OccurredAt;
+                }
+
+                ActivityReceived?.Invoke(this, activity);
+            }
+
+            return;
+        }
+
+        if (type != "channel_points_redemption")
+        {
+            // Unknown event type -- ignore for forward compatibility.
             return;
         }
 
@@ -170,6 +264,35 @@ public sealed class CompanionEventStream
         {
             RedemptionReceived?.Invoke(this, redemption);
         }
+    }
+
+    private static string? TryReadType(string data)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(data);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("type", out JsonElement typeElement)
+                && typeElement.ValueKind == JsonValueKind.String)
+            {
+                return typeElement.GetString();
+            }
+        }
+        catch (JsonException)
+        {
+            // Not JSON -- HandleEvent's caller already returns on this below.
+        }
+
+        return null;
+    }
+
+    private sealed class RecentActivityResponse
+    {
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+
+        [JsonPropertyName("events")]
+        public List<CompanionActivityEvent>? Events { get; set; }
     }
 
     private static bool IsComplete(RedemptionEvent redemption) =>
