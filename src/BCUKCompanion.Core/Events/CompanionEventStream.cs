@@ -24,7 +24,12 @@ public sealed class CompanionEventStream
     // Watermark of the newest activity event already surfaced (live or backfilled),
     // so a post-reconnect backfill from GET /api/companion/events/recent doesn't
     // re-raise ActivityReceived for events already delivered live before the drop.
+    // The server has no unique event ID/cursor (see companionappsetupguide.md), so two
+    // distinct events sharing the same OccurredAt can't be told apart by timestamp alone --
+    // _seenAtWatermark holds signatures of everything already seen exactly at the
+    // watermark, so a same-timestamp event isn't wrongly dropped as a duplicate.
     private DateTimeOffset _lastActivitySeenAt = DateTimeOffset.MinValue;
+    private readonly HashSet<string> _seenAtWatermark = new(StringComparer.Ordinal);
 
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
     public event EventHandler<CompanionActivityEvent>? ActivityReceived;
@@ -166,10 +171,11 @@ public sealed class CompanionEventStream
 
     /// <summary>
     /// Best-effort fetch of activity events missed while disconnected, via
-    /// GET /api/companion/events/recent. Filters out anything at or before
-    /// <see cref="_lastActivitySeenAt"/> so events already delivered live
-    /// aren't re-raised, then advances the watermark. Errors are swallowed —
-    /// this must never fail the connection attempt itself.
+    /// GET /api/companion/events/recent. Discards anything the server marked
+    /// unsuccessful (<c>ok: false</c>) or that fails the same validation live
+    /// events go through, then raises <see cref="ActivityReceived"/> only for
+    /// records not already delivered (see <see cref="MarkSeen"/>). Errors are
+    /// swallowed — this must never fail the connection attempt itself.
     /// </summary>
     private async Task FetchRecentActivityAsync(string token, CancellationToken cancellationToken)
     {
@@ -177,7 +183,7 @@ public sealed class CompanionEventStream
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        List<CompanionActivityEvent>? events;
+        RecentActivityResponse? parsed;
         try
         {
             using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -187,22 +193,24 @@ public sealed class CompanionEventStream
             }
 
             string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            events = JsonSerializer.Deserialize<RecentActivityResponse>(body)?.Events;
+            parsed = JsonSerializer.Deserialize<RecentActivityResponse>(body);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
             return;
         }
 
-        if (events is null)
+        if (parsed is not { Ok: true, Events: not null })
         {
             return;
         }
 
-        foreach (CompanionActivityEvent activity in events.Where(e => e.OccurredAt > _lastActivitySeenAt).OrderBy(e => e.OccurredAt))
+        foreach (CompanionActivityEvent activity in parsed.Events.Where(IsValidActivity).OrderBy(e => e.OccurredAt))
         {
-            _lastActivitySeenAt = activity.OccurredAt;
-            ActivityReceived?.Invoke(this, activity);
+            if (MarkSeen(activity))
+            {
+                ActivityReceived?.Invoke(this, activity);
+            }
         }
     }
 
@@ -243,18 +251,52 @@ public sealed class CompanionEventStream
             return;
         }
 
-        if (activity is null || string.IsNullOrWhiteSpace(activity.DisplayName) || activity.OccurredAt == default)
+        if (!IsValidActivity(activity))
         {
             return;
         }
 
+        // Always raise for a live event -- MarkSeen's return value only matters for
+        // deciding whether a *backfilled* record duplicates something already delivered.
+        MarkSeen(activity!);
+        ActivityReceived?.Invoke(this, activity!);
+    }
+
+    private static bool IsValidActivity(CompanionActivityEvent? activity) =>
+        activity is not null
+        && ActivityEventTypes.Contains(activity.Type)
+        && !string.IsNullOrWhiteSpace(activity.DisplayName)
+        && activity.OccurredAt != default;
+
+    /// <summary>
+    /// Records <paramref name="activity"/> against the backfill watermark, returning whether
+    /// it's newer than (or not previously recorded at) that watermark. Live events always
+    /// raise <see cref="ActivityReceived"/> regardless of this result -- only backfilled
+    /// events (see <see cref="FetchRecentActivityAsync"/>) use it to skip duplicates.
+    /// </summary>
+    private bool MarkSeen(CompanionActivityEvent activity)
+    {
         if (activity.OccurredAt > _lastActivitySeenAt)
         {
             _lastActivitySeenAt = activity.OccurredAt;
+            _seenAtWatermark.Clear();
+            _seenAtWatermark.Add(ActivitySignature(activity));
+            return true;
         }
 
-        ActivityReceived?.Invoke(this, activity);
+        if (activity.OccurredAt == _lastActivitySeenAt)
+        {
+            return _seenAtWatermark.Add(ActivitySignature(activity));
+        }
+
+        return false;
     }
+
+    // U+0001 as a field separator avoids collisions between fields of different lengths
+    // concatenating into the same string (e.g. Type "fo"+DisplayName "obar" vs. Type
+    // "foo"+DisplayName "bar").
+    private static string ActivitySignature(CompanionActivityEvent activity) =>
+        $"{activity.Type}{activity.DisplayName}{activity.Detail}";
 
     private void HandleRedemptionEvent(string data)
     {
