@@ -256,10 +256,14 @@ public sealed class CompanionEventStream
             return;
         }
 
-        // Always raise for a live event -- MarkSeen's return value only matters for
-        // deciding whether a *backfilled* record duplicates something already delivered.
-        MarkSeen(activity!);
-        ActivityReceived?.Invoke(this, activity!);
+        // A live event can duplicate one already surfaced by the reconnect backfill --
+        // the backfill request races the SSE connection, so the server can buffer this
+        // same event on the wire before the backfill response comes back. Only raise it
+        // if MarkSeen says it's genuinely new.
+        if (MarkSeen(activity!))
+        {
+            ActivityReceived?.Invoke(this, activity!);
+        }
     }
 
     private static bool IsValidActivity(CompanionActivityEvent? activity) =>
@@ -269,10 +273,12 @@ public sealed class CompanionEventStream
         && activity.OccurredAt != default;
 
     /// <summary>
-    /// Records <paramref name="activity"/> against the backfill watermark, returning whether
-    /// it's newer than (or not previously recorded at) that watermark. Live events always
-    /// raise <see cref="ActivityReceived"/> regardless of this result -- only backfilled
-    /// events (see <see cref="FetchRecentActivityAsync"/>) use it to skip duplicates.
+    /// Records <paramref name="activity"/> against the watermark shared by both live and
+    /// backfilled dispatch, returning whether it's newer than (or not previously recorded at)
+    /// that watermark. Both <see cref="HandleActivityEvent"/> and
+    /// <see cref="FetchRecentActivityAsync"/> only raise <see cref="ActivityReceived"/> when
+    /// this returns true, so the same activity arriving via both paths (the backfill request
+    /// races the live SSE connection) is only delivered once.
     /// </summary>
     private bool MarkSeen(CompanionActivityEvent activity)
     {

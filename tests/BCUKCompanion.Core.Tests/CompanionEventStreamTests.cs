@@ -111,6 +111,30 @@ public class CompanionEventStreamTests
     }
 
     [Fact]
+    public async Task ActivityPresentInBothInitialBackfillAndInitialSseBodyIsDispatchedOnce()
+    {
+        const string sameTimestamp = "2026-01-01T00:00:00Z";
+        const string recent = """{"ok":true,"events":[{"type":"sub","displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}]}""";
+        string sse = "data: {\"type\":\"sub\",\"displayName\":\"Alice\",\"detail\":null,\"occurredAt\":\"" + sameTimestamp + "\"}\n\n";
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: recent);
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var received = new List<CompanionActivityEvent>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
+        // Give a would-be duplicate live dispatch a moment to have fired if it were going to.
+        await Task.Delay(50);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        CompanionActivityEvent activity = Assert.Single(received);
+        Assert.Equal("Alice", activity.DisplayName);
+    }
+
+    [Fact]
     public async Task BackfillIgnoresOkFalseResponse()
     {
         const string recent = """{"ok":false,"events":[{"type":"sub","displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}]}""";
