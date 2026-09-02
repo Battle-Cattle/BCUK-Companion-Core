@@ -11,6 +11,17 @@ public class CompanionClientTests
         new(new Uri("https://bot.example.com"), tokenStore, new HttpClient());
 
     [Fact]
+    public void ThrowsForNonHttpsBotHost()
+    {
+        var tokenStore = new FakeTokenStore();
+
+        var ex = Assert.Throws<ArgumentException>(
+            () => new CompanionClient(new Uri("http://bot.example.com"), tokenStore, new HttpClient()));
+
+        Assert.Equal("botHost", ex.ParamName);
+    }
+
+    [Fact]
     public void IsLoggedInReflectsTokenStoreState()
     {
         var tokenStore = new FakeTokenStore();
