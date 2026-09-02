@@ -130,6 +130,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         bool wasLoggedIn = _companionClient.IsLoggedIn;
 
         _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
+        _companionClient.Events.ActivityReceived -= OnActivityReceived;
         _companionClient.Events.ConnectionStateChanged -= OnConnectionStateChanged;
         _companionClient.Dispose();
 
@@ -148,6 +149,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     {
         var client = new CompanionClient(botHost, new DpapiFileTokenStore(AppPaths.TokenFile));
         client.Events.RedemptionReceived += OnRedemptionReceived;
+        client.Events.ActivityReceived += OnActivityReceived;
         client.Events.ConnectionStateChanged += OnConnectionStateChanged;
 
         try
@@ -181,6 +183,44 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                         ["userName"] = redemption.UserName,
                         ["userInput"] = redemption.UserInput,
                         ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
+                    }));
+            }
+            catch (Exception)
+            {
+                // Host-supplied callback — don't let it take down the shared tray process.
+            }
+        });
+    }
+
+    private static readonly Dictionary<string, string> ActivityTitles = new(StringComparer.Ordinal)
+    {
+        ["follow"] = "New Follower",
+        ["sub"] = "New Sub",
+        ["resub"] = "Resub",
+        ["giftsub"] = "Gift Sub",
+        ["raid"] = "Raid",
+    };
+
+    private void OnActivityReceived(object? sender, CompanionActivityEvent activity)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            string title = ActivityTitles.TryGetValue(activity.Type, out string? knownTitle) ? knownTitle : activity.Type;
+            string text = string.IsNullOrEmpty(activity.Detail)
+                ? activity.DisplayName
+                : $"{activity.DisplayName} — {activity.Detail}";
+            _trayIcon.ShowBalloon(title, text);
+
+            try
+            {
+                _options.OnBotEvent?.Invoke(new BotEventArgs(
+                    "activity.received",
+                    new Dictionary<string, string?>
+                    {
+                        ["type"] = activity.Type,
+                        ["displayName"] = activity.DisplayName,
+                        ["detail"] = activity.Detail,
+                        ["occurredAt"] = activity.OccurredAt.ToString("o"),
                     }));
             }
             catch (Exception)
