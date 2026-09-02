@@ -84,13 +84,50 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
     public async Task<IReadOnlyList<Reward>> GetRewardsAsync(CancellationToken cancellationToken = default)
     {
+        RewardsResponse parsed = await FetchAsync<RewardsResponse>(
+            "/api/companion/rewards", "Fetching rewards", cancellationToken).ConfigureAwait(false);
+
+        return (IReadOnlyList<Reward>?)parsed.Rewards ?? Array.Empty<Reward>();
+    }
+
+    /// <summary>
+    /// Fetches streamer activity events (follow/sub/resub/giftsub/raid — no redemptions)
+    /// missed while disconnected, from GET /api/companion/events/recent. Meant for a
+    /// one-off catch-up call; <see cref="Events"/> already backfills this automatically
+    /// on every (re)connect, so most callers won't need to call this directly.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
+    public async Task<IReadOnlyList<CompanionActivityEvent>> GetRecentActivityEventsAsync(CancellationToken cancellationToken = default)
+    {
+        RecentActivityResponse parsed = await FetchAsync<RecentActivityResponse>(
+            "/api/companion/events/recent", "Fetching recent activity", cancellationToken).ConfigureAwait(false);
+
+        return (IReadOnlyList<CompanionActivityEvent>?)parsed.Events ?? Array.Empty<CompanionActivityEvent>();
+    }
+
+    /// <summary>
+    /// Sends an authenticated GET to a companion API path and deserializes the response body as
+    /// <typeparamref name="TResponse"/>. Shared by every simple request/response companion
+    /// endpoint (as opposed to <see cref="Events"/>, which is long-lived/streaming). Every
+    /// <typeparamref name="TResponse"/> carries an <see cref="IApiEnvelope.Ok"/>/
+    /// <see cref="IApiEnvelope.Error"/> envelope, checked here so an HTTP 200 the server marked
+    /// <c>ok: false</c> throws instead of silently looking like an empty/absent result.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status, an unparseable body, or an <c>ok: false</c> envelope.</exception>
+    private async Task<TResponse> FetchAsync<TResponse>(string path, string operationDescription, CancellationToken cancellationToken)
+        where TResponse : class, IApiEnvelope
+    {
         string? token = _tokenStore.Load();
         if (token is null)
         {
             throw new InvalidOperationException("No companion token saved — log in first.");
         }
 
-        var requestUri = new Uri(_botHost, "/api/companion/rewards");
+        var requestUri = new Uri(_botHost, path);
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -99,49 +136,54 @@ public sealed class CompanionClient : IDisposable
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            throw new CompanionAuthException(TryExtractError(body) ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
+            throw new CompanionAuthException(JsonHelpers.TryGetString(body, "error") ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
         }
 
         if (!response.IsSuccessStatusCode)
         {
-            string message = TryExtractError(body) ?? $"Fetching rewards failed with status {(int)response.StatusCode}.";
+            string message = JsonHelpers.TryGetString(body, "error") ?? $"{operationDescription} failed with status {(int)response.StatusCode}.";
             throw new CompanionApiException(message, (int)response.StatusCode);
         }
 
-        RewardsResponse? parsed;
+        TResponse? parsed;
         try
         {
-            parsed = JsonSerializer.Deserialize<RewardsResponse>(body);
+            parsed = JsonSerializer.Deserialize<TResponse>(body);
         }
         catch (JsonException)
         {
-            throw new CompanionApiException("Rewards response was not valid JSON.", (int)response.StatusCode);
+            throw new CompanionApiException($"{operationDescription} response was not valid JSON.", (int)response.StatusCode);
         }
 
-        return (IReadOnlyList<Reward>?)parsed?.Rewards ?? Array.Empty<Reward>();
+        if (parsed is null || !parsed.Ok)
+        {
+            throw new CompanionApiException(parsed?.Error ?? $"{operationDescription} failed.", (int)response.StatusCode);
+        }
+
+        return parsed;
     }
 
-    private static string? TryExtractError(string body)
+    /// <summary>Common envelope shape (<c>{ ok, error, ... }</c>) every companion request/response API returns.</summary>
+    private interface IApiEnvelope
     {
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("error", out JsonElement errorElement)
-                && errorElement.ValueKind == JsonValueKind.String)
-            {
-                return errorElement.GetString();
-            }
-        }
-        catch (JsonException)
-        {
-            // Not JSON — fall through to the generic message.
-        }
+        bool Ok { get; }
 
-        return null;
+        string? Error { get; }
     }
 
-    private sealed class RewardsResponse
+    private sealed class RecentActivityResponse : IApiEnvelope
+    {
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+
+        [JsonPropertyName("events")]
+        public List<CompanionActivityEvent>? Events { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
+    }
+
+    private sealed class RewardsResponse : IApiEnvelope
     {
         [JsonPropertyName("ok")]
         public bool Ok { get; set; }
