@@ -78,39 +78,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
     public async Task<IReadOnlyList<Reward>> GetRewardsAsync(CancellationToken cancellationToken = default)
     {
-        string? token = _tokenStore.Load();
-        if (token is null)
-        {
-            throw new InvalidOperationException("No companion token saved — log in first.");
-        }
-
-        var requestUri = new Uri(_botHost, "/api/companion/rewards");
-        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            throw new CompanionAuthException(TryExtractError(body) ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            string message = TryExtractError(body) ?? $"Fetching rewards failed with status {(int)response.StatusCode}.";
-            throw new CompanionApiException(message, (int)response.StatusCode);
-        }
-
-        RewardsResponse? parsed;
-        try
-        {
-            parsed = JsonSerializer.Deserialize<RewardsResponse>(body);
-        }
-        catch (JsonException)
-        {
-            throw new CompanionApiException("Rewards response was not valid JSON.", (int)response.StatusCode);
-        }
+        RewardsResponse? parsed = await FetchAsync<RewardsResponse>(
+            "/api/companion/rewards", "Fetching rewards", cancellationToken).ConfigureAwait(false);
 
         return (IReadOnlyList<Reward>?)parsed?.Rewards ?? Array.Empty<Reward>();
     }
@@ -126,13 +95,30 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
     public async Task<IReadOnlyList<CompanionActivityEvent>> GetRecentActivityEventsAsync(CancellationToken cancellationToken = default)
     {
+        RecentActivityResponse? parsed = await FetchAsync<RecentActivityResponse>(
+            "/api/companion/events/recent", "Fetching recent activity", cancellationToken).ConfigureAwait(false);
+
+        return (IReadOnlyList<CompanionActivityEvent>?)parsed?.Events ?? Array.Empty<CompanionActivityEvent>();
+    }
+
+    /// <summary>
+    /// Sends an authenticated GET to a companion API path and deserializes the response body as
+    /// <typeparamref name="TResponse"/>. Shared by every simple request/response companion
+    /// endpoint (as opposed to <see cref="Events"/>, which is long-lived/streaming).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
+    private async Task<TResponse?> FetchAsync<TResponse>(string path, string operationDescription, CancellationToken cancellationToken)
+        where TResponse : class
+    {
         string? token = _tokenStore.Load();
         if (token is null)
         {
             throw new InvalidOperationException("No companion token saved — log in first.");
         }
 
-        var requestUri = new Uri(_botHost, "/api/companion/events/recent");
+        var requestUri = new Uri(_botHost, path);
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -141,26 +127,23 @@ public sealed class CompanionClient : IDisposable
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            throw new CompanionAuthException(TryExtractError(body) ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
+            throw new CompanionAuthException(JsonHelpers.TryGetString(body, "error") ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
         }
 
         if (!response.IsSuccessStatusCode)
         {
-            string message = TryExtractError(body) ?? $"Fetching recent activity failed with status {(int)response.StatusCode}.";
+            string message = JsonHelpers.TryGetString(body, "error") ?? $"{operationDescription} failed with status {(int)response.StatusCode}.";
             throw new CompanionApiException(message, (int)response.StatusCode);
         }
 
-        RecentActivityResponse? parsed;
         try
         {
-            parsed = JsonSerializer.Deserialize<RecentActivityResponse>(body);
+            return JsonSerializer.Deserialize<TResponse>(body);
         }
         catch (JsonException)
         {
-            throw new CompanionApiException("Recent activity response was not valid JSON.", (int)response.StatusCode);
+            throw new CompanionApiException($"{operationDescription} response was not valid JSON.", (int)response.StatusCode);
         }
-
-        return (IReadOnlyList<CompanionActivityEvent>?)parsed?.Events ?? Array.Empty<CompanionActivityEvent>();
     }
 
     private sealed class RecentActivityResponse
@@ -173,26 +156,6 @@ public sealed class CompanionClient : IDisposable
 
         [JsonPropertyName("error")]
         public string? Error { get; set; }
-    }
-
-    private static string? TryExtractError(string body)
-    {
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("error", out JsonElement errorElement)
-                && errorElement.ValueKind == JsonValueKind.String)
-            {
-                return errorElement.GetString();
-            }
-        }
-        catch (JsonException)
-        {
-            // Not JSON — fall through to the generic message.
-        }
-
-        return null;
     }
 
     private sealed class RewardsResponse

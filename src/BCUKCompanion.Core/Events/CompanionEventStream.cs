@@ -213,7 +213,7 @@ public sealed class CompanionEventStream
             return;
         }
 
-        string? type = TryReadType(sseEvent.Data);
+        string? type = JsonHelpers.TryGetString(sseEvent.Data, "type");
         if (type is null)
         {
             return;
@@ -221,39 +221,47 @@ public sealed class CompanionEventStream
 
         if (ActivityEventTypes.Contains(type))
         {
-            CompanionActivityEvent? activity;
-            try
-            {
-                activity = JsonSerializer.Deserialize<CompanionActivityEvent>(sseEvent.Data);
-            }
-            catch (JsonException)
-            {
-                return;
-            }
-
-            if (activity is not null && !string.IsNullOrWhiteSpace(activity.DisplayName) && activity.OccurredAt != default)
-            {
-                if (activity.OccurredAt > _lastActivitySeenAt)
-                {
-                    _lastActivitySeenAt = activity.OccurredAt;
-                }
-
-                ActivityReceived?.Invoke(this, activity);
-            }
-
-            return;
+            HandleActivityEvent(sseEvent.Data);
         }
-
-        if (type != "channel_points_redemption")
+        else if (type == "channel_points_redemption")
         {
-            // Unknown event type -- ignore for forward compatibility.
+            HandleRedemptionEvent(sseEvent.Data);
+        }
+
+        // Any other type is ignored for forward compatibility.
+    }
+
+    private void HandleActivityEvent(string data)
+    {
+        CompanionActivityEvent? activity;
+        try
+        {
+            activity = JsonSerializer.Deserialize<CompanionActivityEvent>(data);
+        }
+        catch (JsonException)
+        {
             return;
         }
 
+        if (activity is null || string.IsNullOrWhiteSpace(activity.DisplayName) || activity.OccurredAt == default)
+        {
+            return;
+        }
+
+        if (activity.OccurredAt > _lastActivitySeenAt)
+        {
+            _lastActivitySeenAt = activity.OccurredAt;
+        }
+
+        ActivityReceived?.Invoke(this, activity);
+    }
+
+    private void HandleRedemptionEvent(string data)
+    {
         RedemptionEvent? redemption;
         try
         {
-            redemption = JsonSerializer.Deserialize<RedemptionEvent>(sseEvent.Data);
+            redemption = JsonSerializer.Deserialize<RedemptionEvent>(data);
         }
         catch (JsonException)
         {
@@ -264,26 +272,6 @@ public sealed class CompanionEventStream
         {
             RedemptionReceived?.Invoke(this, redemption);
         }
-    }
-
-    private static string? TryReadType(string data)
-    {
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(data);
-            if (document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("type", out JsonElement typeElement)
-                && typeElement.ValueKind == JsonValueKind.String)
-            {
-                return typeElement.GetString();
-            }
-        }
-        catch (JsonException)
-        {
-            // Not JSON -- HandleEvent's caller already returns on this below.
-        }
-
-        return null;
     }
 
     private sealed class RecentActivityResponse
