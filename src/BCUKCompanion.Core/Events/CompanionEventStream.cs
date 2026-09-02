@@ -29,7 +29,7 @@ public sealed class CompanionEventStream
     // _seenAtWatermark holds signatures of everything already seen exactly at the
     // watermark, so a same-timestamp event isn't wrongly dropped as a duplicate.
     private DateTimeOffset _lastActivitySeenAt = DateTimeOffset.MinValue;
-    private readonly HashSet<string> _seenAtWatermark = new(StringComparer.Ordinal);
+    private readonly HashSet<(string Type, string DisplayName, string? Detail)> _seenAtWatermark = new();
 
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
     public event EventHandler<CompanionActivityEvent>? ActivityReceived;
@@ -298,11 +298,11 @@ public sealed class CompanionEventStream
         return false;
     }
 
-    // U+0001 as a field separator avoids collisions between fields of different lengths
-    // concatenating into the same string (e.g. Type "fo"+DisplayName "obar" vs. Type
-    // "foo"+DisplayName "bar").
-    private static string ActivitySignature(CompanionActivityEvent activity) =>
-        $"{activity.Type}{activity.DisplayName}{activity.Detail}";
+    // A structural tuple, rather than a concatenated string, so no field value (however
+    // unlikely) can make two distinct activities collide into the same signature, and so
+    // a null Detail stays distinguishable from an empty one.
+    private static (string Type, string DisplayName, string? Detail) ActivitySignature(CompanionActivityEvent activity) =>
+        (activity.Type, activity.DisplayName, activity.Detail);
 
     private void HandleRedemptionEvent(string data)
     {

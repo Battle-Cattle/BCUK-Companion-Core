@@ -57,6 +57,19 @@ public class GetRecentActivityEventsAsyncTests
     }
 
     [Fact]
+    public async Task ThrowsCompanionApiExceptionWhenResponseEnvelopeIsNotOk()
+    {
+        var tokenStore = new FakeTokenStore();
+        tokenStore.Save("abc123");
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """{"ok":false,"error":"Backfill temporarily unavailable"}""");
+        using CompanionClient client = CreateClient(tokenStore, handler);
+
+        CompanionApiException ex = await Assert.ThrowsAsync<CompanionApiException>(() => client.GetRecentActivityEventsAsync());
+
+        Assert.Equal("Backfill temporarily unavailable", ex.Message);
+    }
+
+    [Fact]
     public async Task ThrowsCompanionAuthExceptionOn401()
     {
         var tokenStore = new FakeTokenStore();
