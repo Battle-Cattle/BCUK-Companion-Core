@@ -59,6 +59,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _companionClient = CreateCompanionClient(_botHost);
 
         _trayIcon = new TrayIconController(_options.AdditionalMenuItems);
+        _options.OnTrayIconReady?.Invoke(_trayIcon.ShowBalloon);
         _trayIcon.OpenLoginRequested += (_, _) => ShowLoginWindow();
         _trayIcon.OpenSettingsRequested += (_, _) => ShowSettingsWindow();
         _trayIcon.ExitRequested += (_, _) => Shutdown();
