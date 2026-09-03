@@ -6,7 +6,7 @@ namespace BCUKCompanion.TrayApp.Views;
 
 public partial class SettingsWindow : Window
 {
-    private readonly CompanionClient _companionClient;
+    private CompanionClient _companionClient;
     private readonly AppSettings _settings;
 
     public event EventHandler? LoggedOut;
@@ -26,6 +26,12 @@ public partial class SettingsWindow : Window
     internal void RefreshBotHost(string botHost)
     {
         BotHostText.Text = botHost;
+    }
+
+    /// <summary>Re-points this still-open window at a companion client created for a newly saved bot host.</summary>
+    internal void UpdateCompanionClient(CompanionClient companionClient)
+    {
+        _companionClient = companionClient;
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)

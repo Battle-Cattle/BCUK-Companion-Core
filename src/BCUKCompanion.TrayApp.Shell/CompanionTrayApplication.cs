@@ -137,6 +137,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _botHost = new Uri(newBotHost);
         _companionClient = CreateCompanionClient(_botHost);
         _loginWindow?.UpdateCompanionClient(_companionClient, newBotHost);
+        _settingsWindow?.UpdateCompanionClient(_companionClient);
         _settingsWindow?.RefreshBotHost(newBotHost);
 
         if (wasLoggedIn)
