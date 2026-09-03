@@ -38,9 +38,9 @@ public partial class LoginWindow : Window
 
         string newBotHost = ServerHostBox.Text.Trim();
         if (!Uri.TryCreate(newBotHost, UriKind.Absolute, out Uri? parsedHost)
-            || (parsedHost.Scheme != Uri.UriSchemeHttp && parsedHost.Scheme != Uri.UriSchemeHttps))
+            || parsedHost.Scheme != Uri.UriSchemeHttps)
         {
-            ServerStatusText.Text = "Enter a valid http(s) server URL.";
+            ServerStatusText.Text = "Enter a valid https server URL.";
             return;
         }
 

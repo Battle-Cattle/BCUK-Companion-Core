@@ -37,7 +37,7 @@ public sealed class AppSettings
 
     private static bool IsValidBotHost(string botHost) =>
         Uri.TryCreate(botHost, UriKind.Absolute, out Uri? uri)
-        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+        && uri.Scheme == Uri.UriSchemeHttps;
 
     private static AppSettings LoadDefaultsFromBundledConfig()
     {
@@ -68,7 +68,7 @@ public sealed class AppSettings
     {
         if (!IsValidBotHost(BotHost))
         {
-            throw new InvalidOperationException("BotHost must be an absolute http(s) URL before settings can be saved.");
+            throw new InvalidOperationException("BotHost must be an absolute https URL before settings can be saved.");
         }
 
         string settingsFile = AppPaths.SettingsFile;
