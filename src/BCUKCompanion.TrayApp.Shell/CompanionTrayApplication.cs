@@ -59,6 +59,17 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _companionClient = CreateCompanionClient(_botHost);
 
         _trayIcon = new TrayIconController(_options.AdditionalMenuItems);
+        try
+        {
+            // Host-supplied callback: isolate it (same as OnClientReady/OnBotEvent) so a
+            // faulty host doesn't take down startup, and marshal ShowBalloon onto the UI
+            // thread since hosts commonly call it from background dispatch (e.g. OnBotEvent).
+            _options.OnTrayIconReady?.Invoke((title, text) => Dispatcher.Invoke(() => _trayIcon.ShowBalloon(title, text)));
+        }
+        catch (Exception)
+        {
+            // Host-supplied callback — do not let it take down the shared tray process.
+        }
         _trayIcon.OpenLoginRequested += (_, _) => ShowLoginWindow();
         _trayIcon.OpenSettingsRequested += (_, _) => ShowSettingsWindow();
         _trayIcon.ExitRequested += (_, _) => Shutdown();
@@ -137,6 +148,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _botHost = new Uri(newBotHost);
         _companionClient = CreateCompanionClient(_botHost);
         _loginWindow?.UpdateCompanionClient(_companionClient, newBotHost);
+        _settingsWindow?.UpdateCompanionClient(_companionClient);
         _settingsWindow?.RefreshBotHost(newBotHost);
 
         if (wasLoggedIn)

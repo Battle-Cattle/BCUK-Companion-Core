@@ -33,4 +33,12 @@ public sealed class CompanionTrayAppOptions
     /// to populate a reward picker — without owning any login/connection lifecycle itself.
     /// </summary>
     public Action<CompanionClient>? OnClientReady { get; init; }
+
+    /// <summary>
+    /// Invoked once at startup with a callback the host can call as
+    /// <c>showBalloon(title, text)</c> to display a tray balloon notification of its own,
+    /// alongside the shell's built-in redemption/activity balloons. The callback is safe to
+    /// call from any thread — it marshals onto the UI thread internally.
+    /// </summary>
+    public Action<Action<string, string>>? OnTrayIconReady { get; init; }
 }
