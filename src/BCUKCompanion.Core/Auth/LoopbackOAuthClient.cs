@@ -138,6 +138,15 @@ public sealed class LoopbackOAuthClient
         Task completed = await Task.WhenAny(contextTask, cancelTcs.Task).ConfigureAwait(false);
         if (completed != contextTask)
         {
+            // contextTask lost the race and is abandoned here. The caller's finally block
+            // will call listener.Stop() shortly after, which typically faults the still-pending
+            // GetContextAsync() (HttpListenerException/ObjectDisposedException). Nothing else
+            // observes that task, so without this it would surface as an unobserved task
+            // exception during finalization. Observe and discard the fault instead of rethrowing.
+            _ = contextTask.ContinueWith(
+                t => t.Exception,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+
             timeoutCts.Token.ThrowIfCancellationRequested();
             throw new OperationCanceledException("Timed out waiting for the companion login callback.");
         }
