@@ -58,9 +58,9 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="ArgumentException"><paramref name="botHost"/> is not an HTTPS URL.</exception>
     public CompanionClient(Uri botHost, ITokenStore tokenStore, HttpClient? httpClient = null)
     {
-        if (botHost.Scheme != Uri.UriSchemeHttps)
+        if (!botHost.IsAbsoluteUri || botHost.Scheme != Uri.UriSchemeHttps)
         {
-            throw new ArgumentException("botHost must be an HTTPS URL — the companion API always requires TLS.", nameof(botHost));
+            throw new ArgumentException("botHost must be an absolute HTTPS URL — the companion API always requires TLS.", nameof(botHost));
         }
 
         _tokenStore = tokenStore;
