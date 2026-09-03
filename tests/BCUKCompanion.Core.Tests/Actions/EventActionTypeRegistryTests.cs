@@ -75,4 +75,23 @@ public class EventActionTypeRegistryTests
 
         Assert.Throws<ArgumentException>(() => registry.Register("bad", typeof(AbstractEventAction)));
     }
+
+    [Fact]
+    public async Task Register_IsSafeForConcurrentDistinctKinds()
+    {
+        var registry = new EventActionTypeRegistry();
+        const int kindCount = 100;
+
+        var tasks = Enumerable.Range(0, kindCount)
+            .Select(i => Task.Run(() => registry.Register($"fake-{i}", typeof(FakeEventAction))))
+            .ToArray();
+
+        await Task.WhenAll(tasks);
+
+        for (var i = 0; i < kindCount; i++)
+        {
+            Assert.True(registry.TryGetType($"fake-{i}", out var type));
+            Assert.Equal(typeof(FakeEventAction), type);
+        }
+    }
 }
