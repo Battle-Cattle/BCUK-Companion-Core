@@ -50,8 +50,15 @@ public sealed class DpapiFileTokenStore : ITokenStore
         }
 
         byte[] plaintext = Encoding.UTF8.GetBytes(token);
-        byte[] encrypted = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.CurrentUser);
-        File.WriteAllBytes(_filePath, encrypted);
+        try
+        {
+            byte[] encrypted = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.CurrentUser);
+            File.WriteAllBytes(_filePath, encrypted);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+        }
     }
 
     public void Clear()
