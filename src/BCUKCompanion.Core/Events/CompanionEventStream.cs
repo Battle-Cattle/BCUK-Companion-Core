@@ -99,7 +99,16 @@ public sealed class CompanionEventStream
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, linkedCts.Token)
                 .ConfigureAwait(false);
         }
-        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        // Only genuine transient connect failures are treated as "try again": a failed DNS
+        // lookup/connect/TLS handshake or a mid-request drop (HttpRequestException, possibly
+        // wrapping a SocketException), the idle-timeout/HttpClient-timeout cancellation that
+        // surfaces as TaskCanceledException (the `when` clause already excludes the caller's
+        // own cancellationToken, so this can't be mistaken for a deliberate stop), a bare
+        // SocketException that reaches here without an HttpRequestException wrapper, or an
+        // IOException from the underlying connection. Anything else (a bug elsewhere in this
+        // method) propagates instead of being silently swallowed and retried forever.
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
+            && ex is HttpRequestException or IOException or TaskCanceledException or System.Net.Sockets.SocketException)
         {
             return (ShouldStop: false, WasConnected: false);
         }

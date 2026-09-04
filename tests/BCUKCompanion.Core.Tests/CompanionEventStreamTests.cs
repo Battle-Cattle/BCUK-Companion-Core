@@ -220,6 +220,26 @@ public class CompanionEventStreamTests
         Assert.Equal(received[0].OccurredAt, received[1].OccurredAt);
     }
 
+    [Fact]
+    public async Task NonNetworkExceptionFromConnectIsNotSilentlySwallowed()
+    {
+        // A NullReferenceException (or any other non-network exception) reaching the
+        // connect-attempt catch is a bug, not a transient network failure -- it must
+        // propagate out of RunAsync rather than being treated identically to a dropped
+        // connection (silently retried forever with no diagnostic trail).
+        var handler = new ThrowingHttpMessageHandler(() => new NullReferenceException("boom"));
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        using var cts = new CancellationTokenSource(TestTimeout);
+        Task runTask = stream.RunAsync("token", cts.Token);
+
+        NullReferenceException thrown = await Assert.ThrowsAsync<NullReferenceException>(() => runTask);
+        Assert.Equal("boom", thrown.Message);
+        // Only ever attempted once -- a caught-and-retried exception would have driven the
+        // handler to be invoked repeatedly within the test timeout instead of faulting RunAsync.
+        Assert.Equal(1, handler.InvocationCount);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);
@@ -277,6 +297,29 @@ public class CompanionEventStreamTests
             {
                 Content = new StringContent(_sseBody),
             });
+        }
+    }
+
+    /// <summary>
+    /// Throws the exception produced by <paramref name="exceptionFactory"/> from every
+    /// SendAsync call, counting how many times it was invoked -- used to assert a non-network
+    /// exception propagates rather than being caught and retried.
+    /// </summary>
+    private sealed class ThrowingHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<Exception> _exceptionFactory;
+
+        public int InvocationCount { get; private set; }
+
+        public ThrowingHttpMessageHandler(Func<Exception> exceptionFactory)
+        {
+            _exceptionFactory = exceptionFactory;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            throw _exceptionFactory();
         }
     }
 
