@@ -33,9 +33,6 @@ public interface IEventActionMappingsConfig
 /// </summary>
 public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig : IEventActionMappingsConfig, new()
 {
-    private const string RedemptionEventName = "redemption.received";
-    private const string RewardTitleMetadataKey = "rewardTitle";
-
     private readonly EventActionConfigStore<TConfig> configStore;
     private readonly EventActionDispatcher dispatcher;
 
@@ -193,7 +190,13 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Preserve whatever the user has already typed: RewardTitleCombo is editable, and WPF
+        // can clear its Text when a fresh ItemsSource assignment invalidates the current
+        // selection, which would silently drop a title typed while this async fetch was in
+        // flight.
+        var typedTitle = RewardTitleCombo.Text;
         RewardTitleCombo.ItemsSource = titles;
+        RewardTitleCombo.Text = typedTitle;
     }
 
     protected void RefreshActionsList()
@@ -315,11 +318,10 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
 
         StatusText.Text = "Testing...";
 
-        EventDispatchResult? result;
+        EventDispatchResult result;
         try
         {
-            var botEvent = new BotEventArgs(RedemptionEventName, new Dictionary<string, string?> { [RewardTitleMetadataKey] = mapping.RewardTitle });
-            result = await dispatcher.DispatchAsync(botEvent).ConfigureAwait(true);
+            result = await dispatcher.DispatchAsync(mapping.RewardTitle).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
@@ -331,7 +333,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             return;
         }
 
-        if (result is null)
+        if (result.ActionResults.Count == 0)
         {
             StatusText.Text = "Test did not dispatch any actions.";
             return;
