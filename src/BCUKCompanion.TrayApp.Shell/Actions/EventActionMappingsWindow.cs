@@ -315,8 +315,21 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
 
         StatusText.Text = "Testing...";
 
-        var botEvent = new BotEventArgs(RedemptionEventName, new Dictionary<string, string?> { [RewardTitleMetadataKey] = mapping.RewardTitle });
-        var result = await dispatcher.DispatchAsync(botEvent).ConfigureAwait(true);
+        EventDispatchResult? result;
+        try
+        {
+            var botEvent = new BotEventArgs(RedemptionEventName, new Dictionary<string, string?> { [RewardTitleMetadataKey] = mapping.RewardTitle });
+            result = await dispatcher.DispatchAsync(botEvent).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            // This runs off an async void button-click handler, so an exception that escapes
+            // here (e.g. from BuildConfig()/BuildContext(), which run outside the per-action
+            // try/catch in EventActionDispatcher) would otherwise crash the process instead of
+            // just failing this one test run.
+            StatusText.Text = $"Test failed: {ex.Message}";
+            return;
+        }
 
         if (result is null)
         {
@@ -335,9 +348,13 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     {
         var idx = Mappings.IndexOf(mapping);
         if (idx < 0) return;
+        // Captured before the swap: WPF's ListBox drops the old item from its selection
+        // synchronously on the Replace notification Mappings[idx] = updated raises below, so
+        // MappingsList.SelectedItem no longer references `mapping` by the time this checks it.
+        var wasSelected = ReferenceEquals(MappingsList.SelectedItem, mapping);
         var updated = mapping with { Actions = newActions };
         Mappings[idx] = updated;
-        if (ReferenceEquals(MappingsList.SelectedItem, mapping))
+        if (wasSelected)
             MappingsList.SelectedItem = updated;
     }
 

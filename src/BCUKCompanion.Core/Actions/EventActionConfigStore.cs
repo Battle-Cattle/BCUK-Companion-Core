@@ -46,8 +46,14 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
                 var json = File.ReadAllText(ConfigFilePath);
                 return JsonSerializer.Deserialize<TConfig>(json, serializerOptions) ?? new TConfig();
             }
-            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            catch (JsonException)
             {
+                // Only a genuine deserialization failure means the file is corrupt and safe to
+                // reset. A transient sharing violation or permission error (IOException,
+                // UnauthorizedAccessException) must propagate instead: treating those the same
+                // as corruption would hand the caller an empty TConfig indistinguishable from a
+                // real reset, and a subsequent Save() would then overwrite an otherwise-intact
+                // file with that empty snapshot.
                 TryBackUpCorruptConfig();
                 return new TConfig();
             }
