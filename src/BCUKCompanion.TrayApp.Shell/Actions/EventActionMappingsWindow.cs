@@ -26,10 +26,10 @@ public interface IEventActionMappingsConfig
 /// <summary>
 /// Owns the "Event Mappings" tab (reward title -> ordered actions, with Add/Edit/Remove/Test)
 /// that every companion app's settings window needs, so each per-user app doesn't have to
-/// reimplement this UI for its own action kinds. Lives in Core (rather than each app's own
-/// repo) so a new companion app gets it for free via <c>BCUKCompanion.TrayApp.Shell</c>; window
-/// chrome (title, size, any extra tabs/panels) and the app-specific action-edit dialog stay
-/// with each subclass.
+/// reimplement this UI for its own action kinds. Lives in <c>BCUKCompanion.TrayApp.Shell</c>
+/// (rather than each app's own repo) so a new companion app gets it for free; window chrome
+/// (title, size, any extra tabs/panels) and the app-specific action-edit dialog stay with each
+/// subclass.
 /// </summary>
 public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig : IEventActionMappingsConfig, new()
 {
@@ -319,30 +319,33 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         StatusText.Text = "Testing...";
 
         EventDispatchResult result;
+        string report;
         try
         {
+            // Guards DispatchAsync, BuildContext(), and Describe() alike: this runs off an
+            // async void button-click handler, so any exception escaping here (BuildConfig()/
+            // BuildContext() run outside EventActionDispatcher's own per-action try/catch, and
+            // a subclass's Describe() override is equally unguarded) would otherwise crash the
+            // process instead of just failing this one test run.
             result = await dispatcher.DispatchAsync(mapping.RewardTitle).ConfigureAwait(true);
+
+            if (result.ActionResults.Count == 0)
+            {
+                StatusText.Text = "Test did not dispatch any actions.";
+                return;
+            }
+
+            var context = BuildContext();
+            report = string.Join("\n", result.ActionResults.Select(r =>
+                $"{r.Action.Describe(context)}: {(r.Success ? "OK" : r.ErrorMessage ?? "Failed")}"));
         }
         catch (Exception ex)
         {
-            // This runs off an async void button-click handler, so an exception that escapes
-            // here (e.g. from BuildConfig()/BuildContext(), which run outside the per-action
-            // try/catch in EventActionDispatcher) would otherwise crash the process instead of
-            // just failing this one test run.
             StatusText.Text = $"Test failed: {ex.Message}";
             return;
         }
 
-        if (result.ActionResults.Count == 0)
-        {
-            StatusText.Text = "Test did not dispatch any actions.";
-            return;
-        }
-
-        var context = BuildContext();
-        var lines = result.ActionResults.Select(r =>
-            $"{r.Action.Describe(context)}: {(r.Success ? "OK" : r.ErrorMessage ?? "Failed")}");
-        MessageBox.Show(this, string.Join("\n", lines), $"Test results: {result.RewardTitle}");
+        MessageBox.Show(this, report, $"Test results: {result.RewardTitle}");
         StatusText.Text = result.AllSucceeded ? "Test succeeded." : "Test completed with errors.";
     }
 
