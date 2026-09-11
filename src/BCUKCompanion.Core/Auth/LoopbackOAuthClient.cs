@@ -147,7 +147,10 @@ public sealed class LoopbackOAuthClient
                 t => t.Exception,
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
 
-            timeoutCts.Token.ThrowIfCancellationRequested();
+            // timeoutCts is a linked source, so its token is always canceled here — it fires
+            // both when the caller's own token is canceled and when `timeout` elapses. Check
+            // the caller's token specifically so a deliberate cancel isn't misreported as a timeout.
+            cancellationToken.ThrowIfCancellationRequested();
             throw new OperationCanceledException("Timed out waiting for the companion login callback.");
         }
 

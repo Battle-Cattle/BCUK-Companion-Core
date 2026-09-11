@@ -155,19 +155,28 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         return splitPanel;
     }
 
+    // Bumped on every RefreshRewardTitleSuggestions() call so an in-flight server fetch can
+    // tell it's been superseded and skip applying its (possibly stale) result out of order.
+    private int _rewardTitleRefreshSequence;
+
     protected void RefreshRewardTitleSuggestions()
     {
+        // Increment unconditionally, even when there's no logged-in client below: otherwise a
+        // refresh that finds no client doesn't invalidate an earlier in-flight fetch, which can
+        // then still pass the sequence check and overwrite these (correct) local-only
+        // suggestions with its now-stale server result.
+        int sequence = ++_rewardTitleRefreshSequence;
         RewardTitleCombo.ItemsSource = Mappings.Select(m => m.RewardTitle).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         // Best-effort enhancement: if we have a logged-in companion client, replace the
         // local-only suggestion list above with the live reward catalog once it arrives.
         if (getCompanionClient?.Invoke() is { IsLoggedIn: true } client)
         {
-            _ = RefreshRewardTitleSuggestionsFromServerAsync(client);
+            _ = RefreshRewardTitleSuggestionsFromServerAsync(client, sequence);
         }
     }
 
-    private async Task RefreshRewardTitleSuggestionsFromServerAsync(CompanionClient client)
+    private async Task RefreshRewardTitleSuggestionsFromServerAsync(CompanionClient client, int sequence)
     {
         IReadOnlyList<Reward> rewards;
         try
@@ -179,6 +188,13 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             // Server unreachable, token expired, etc. — the local-only suggestions set in
             // RefreshRewardTitleSuggestions() above stand; there's no dedicated retry here
             // since the user can always type a title that isn't in the list.
+            return;
+        }
+
+        if (sequence != _rewardTitleRefreshSequence)
+        {
+            // A newer refresh was started while this fetch was in flight — its result will
+            // apply instead, so don't overwrite it with this now-stale one.
             return;
         }
 
