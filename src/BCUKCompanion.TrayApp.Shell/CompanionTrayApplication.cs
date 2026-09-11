@@ -143,6 +143,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
         _companionClient.Events.ActivityReceived -= OnActivityReceived;
         _companionClient.Events.ConnectionStateChanged -= OnConnectionStateChanged;
+        _companionClient.ListenLoopFaulted -= OnListenLoopFaulted;
         _companionClient.Dispose();
 
         _botHost = new Uri(newBotHost);
@@ -163,6 +164,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         client.Events.RedemptionReceived += OnRedemptionReceived;
         client.Events.ActivityReceived += OnActivityReceived;
         client.Events.ConnectionStateChanged += OnConnectionStateChanged;
+        client.ListenLoopFaulted += OnListenLoopFaulted;
 
         try
         {
@@ -253,6 +255,25 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             {
                 _companionClient.StopListening();
                 ShowLoginWindow();
+            }
+        });
+    }
+
+    /// <summary>
+    /// The listen loop ended because of an unexpected exception rather than a
+    /// deliberate StopListening()/restart. Left unhandled, the tray icon would
+    /// silently freeze on its last status with no further events ever
+    /// arriving — so surface it and restart listening if we're still logged in.
+    /// </summary>
+    private void OnListenLoopFaulted(object? sender, Exception ex)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            _trayIcon.ShowBalloon("BCUK Companion", "Lost connection to the event stream — reconnecting…");
+
+            if (_companionClient.IsLoggedIn)
+            {
+                _companionClient.StartListening();
             }
         });
     }

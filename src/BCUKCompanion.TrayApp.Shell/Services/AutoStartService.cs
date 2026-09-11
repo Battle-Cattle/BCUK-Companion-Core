@@ -13,20 +13,19 @@ internal static class AutoStartService
 
     public static void SetEnabled(bool enabled)
     {
-        using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
-        if (key is null)
-        {
-            return;
-        }
-
         if (enabled)
         {
+            // CreateSubKey opens the key if it exists and creates it (plus any
+            // missing ancestors) if it doesn't -- OpenSubKey would instead return
+            // null and silently no-op on a profile where Run hasn't been created yet.
+            using RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true);
             string exePath = Environment.ProcessPath ?? Environment.GetCommandLineArgs()[0];
             key.SetValue(_valueName, $"\"{exePath}\" --minimized");
         }
         else
         {
-            key.DeleteValue(_valueName, throwOnMissingValue: false);
+            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+            key?.DeleteValue(_valueName, throwOnMissingValue: false);
         }
     }
 

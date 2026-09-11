@@ -161,6 +161,12 @@ public sealed class CompanionEventStream
             {
                 // Connection dropped — fall through to reconnect.
             }
+            catch (Exception ex) when (ex is HttpRequestException or System.Net.Sockets.SocketException)
+            {
+                // Mid-stream connection reset, possibly surfaced as HttpRequestException
+                // rather than IOException depending on the transport — fall through to reconnect,
+                // same as the connect-phase catch above.
+            }
 
             return (ShouldStop: false, WasConnected: true);
         }
