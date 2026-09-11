@@ -161,13 +161,17 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
 
     protected void RefreshRewardTitleSuggestions()
     {
+        // Increment unconditionally, even when there's no logged-in client below: otherwise a
+        // refresh that finds no client doesn't invalidate an earlier in-flight fetch, which can
+        // then still pass the sequence check and overwrite these (correct) local-only
+        // suggestions with its now-stale server result.
+        int sequence = ++_rewardTitleRefreshSequence;
         RewardTitleCombo.ItemsSource = Mappings.Select(m => m.RewardTitle).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         // Best-effort enhancement: if we have a logged-in companion client, replace the
         // local-only suggestion list above with the live reward catalog once it arrives.
         if (getCompanionClient?.Invoke() is { IsLoggedIn: true } client)
         {
-            int sequence = ++_rewardTitleRefreshSequence;
             _ = RefreshRewardTitleSuggestionsFromServerAsync(client, sequence);
         }
     }
