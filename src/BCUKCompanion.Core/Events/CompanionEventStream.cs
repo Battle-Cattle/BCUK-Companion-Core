@@ -279,12 +279,20 @@ public sealed class CompanionEventStream
         }
     }
 
-    private static bool IsValidActivity(CompanionActivityEvent? activity) =>
-        activity is not null
-        && ActivityEventTypes.Contains(activity.Type)
-        && !string.IsNullOrWhiteSpace(activity.DisplayName)
-        && activity.OccurredAt != default
-        && activity.Id > 0;
+    private static bool IsValidActivity(CompanionActivityEvent? activity)
+    {
+        if (activity is null)
+        {
+            return false;
+        }
+
+        var hasKnownType = ActivityEventTypes.Contains(activity.Type);
+        var hasDisplayName = !string.IsNullOrWhiteSpace(activity.DisplayName);
+        var hasOccurredAt = activity.OccurredAt != default;
+        var hasValidId = activity.Id > 0;
+
+        return hasKnownType && hasDisplayName && hasOccurredAt && hasValidId;
+    }
 
     /// <summary>
     /// Records <paramref name="activity"/> against the id high-water mark shared by both live
