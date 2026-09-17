@@ -36,7 +36,7 @@ public class CompanionEventStreamTests
     public async Task RaisesActivityReceivedForFollowPayload()
     {
         const string sse = """
-            data: {"type":"follow","displayName":"SomeViewer","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}
+            data: {"type":"follow","id":1,"displayName":"SomeViewer","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}
 
             """;
         var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
@@ -88,8 +88,8 @@ public class CompanionEventStreamTests
     {
         const string recent = """
             {"ok":true,"events":[
-              {"type":"sub","displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
-              {"type":"raid","displayName":"Bob","detail":"50 raiders","occurredAt":"2026-01-01T00:01:00Z"}
+              {"type":"sub","id":1,"displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
+              {"type":"raid","id":2,"displayName":"Bob","detail":"50 raiders","occurredAt":"2026-01-01T00:01:00Z"}
             ]}
             """;
         var handler = new RoutingHttpMessageHandler(sseBody: string.Empty, recentEventsBody: recent);
@@ -114,8 +114,8 @@ public class CompanionEventStreamTests
     public async Task ActivityPresentInBothInitialBackfillAndInitialSseBodyIsDispatchedOnce()
     {
         const string sameTimestamp = "2026-01-01T00:00:00Z";
-        const string recent = """{"ok":true,"events":[{"type":"sub","displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}]}""";
-        string sse = "data: {\"type\":\"sub\",\"displayName\":\"Alice\",\"detail\":null,\"occurredAt\":\"" + sameTimestamp + "\"}\n\n";
+        const string recent = """{"ok":true,"events":[{"type":"sub","id":1,"displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}]}""";
+        string sse = "data: {\"type\":\"sub\",\"id\":1,\"displayName\":\"Alice\",\"detail\":null,\"occurredAt\":\"" + sameTimestamp + "\"}\n\n";
         var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: recent);
         var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
 
@@ -137,7 +137,7 @@ public class CompanionEventStreamTests
     [Fact]
     public async Task BackfillIgnoresOkFalseResponse()
     {
-        const string recent = """{"ok":false,"events":[{"type":"sub","displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}]}""";
+        const string recent = """{"ok":false,"events":[{"type":"sub","id":1,"displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}]}""";
         var handler = new RoutingHttpMessageHandler(sseBody: string.Empty, recentEventsBody: recent);
         var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
 
@@ -160,9 +160,10 @@ public class CompanionEventStreamTests
     {
         const string recent = """
             {"ok":true,"events":[
-              {"type":"sub","displayName":"","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
-              {"type":"unknown_future_type","displayName":"Someone","detail":null,"occurredAt":"2026-01-01T00:01:00Z"},
-              {"type":"raid","displayName":"Bob","detail":"50 raiders","occurredAt":"2026-01-01T00:02:00Z"}
+              {"type":"sub","id":1,"displayName":"","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
+              {"type":"unknown_future_type","id":2,"displayName":"Someone","detail":null,"occurredAt":"2026-01-01T00:01:00Z"},
+              {"type":"giftsub","displayName":"NoId","detail":null,"occurredAt":"2026-01-01T00:01:30Z"},
+              {"type":"raid","id":3,"displayName":"Bob","detail":"50 raiders","occurredAt":"2026-01-01T00:02:00Z"}
             ]}
             """;
         var handler = new RoutingHttpMessageHandler(sseBody: string.Empty, recentEventsBody: recent);
@@ -182,14 +183,14 @@ public class CompanionEventStreamTests
     }
 
     [Fact]
-    public async Task ReconnectBackfillDoesNotDropADistinctEventSharingTheLiveWatermarkTimestamp()
+    public async Task ReconnectBackfillDoesNotDropADistinctEventSharingTheLiveWatermarkId()
     {
         const string sameTimestamp = "2026-01-01T00:00:00Z";
-        string firstConnectionSse = "data: {\"type\":\"sub\",\"displayName\":\"Alice\",\"detail\":null,\"occurredAt\":\"" + sameTimestamp + "\"}\n\n";
+        string firstConnectionSse = "data: {\"type\":\"sub\",\"id\":1,\"displayName\":\"Alice\",\"detail\":null,\"occurredAt\":\"" + sameTimestamp + "\"}\n\n";
         string secondConnectionRecent = """
             {"ok":true,"events":[
-              {"type":"sub","displayName":"Alice","detail":null,"occurredAt":"REPLACE"},
-              {"type":"sub","displayName":"Bob","detail":null,"occurredAt":"REPLACE"}
+              {"type":"sub","id":1,"displayName":"Alice","detail":null,"occurredAt":"REPLACE"},
+              {"type":"sub","id":2,"displayName":"Bob","detail":null,"occurredAt":"REPLACE"}
             ]}
             """.Replace("REPLACE", sameTimestamp);
         var handler = new SequencedRoutingHttpMessageHandler(

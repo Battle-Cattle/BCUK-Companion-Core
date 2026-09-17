@@ -21,15 +21,13 @@ public sealed class CompanionEventStream
     private static readonly HashSet<string> ActivityEventTypes =
         new(StringComparer.Ordinal) { "follow", "sub", "resub", "giftsub", "raid" };
 
-    // Watermark of the newest activity event already surfaced (live or backfilled),
-    // so a post-reconnect backfill from GET /api/companion/events/recent doesn't
-    // re-raise ActivityReceived for events already delivered live before the drop.
-    // The server has no unique event ID/cursor (see companionappsetupguide.md), so two
-    // distinct events sharing the same OccurredAt can't be told apart by timestamp alone --
-    // _seenAtWatermark holds signatures of everything already seen exactly at the
-    // watermark, so a same-timestamp event isn't wrongly dropped as a duplicate.
-    private DateTimeOffset _lastActivitySeenAt = DateTimeOffset.MinValue;
-    private readonly HashSet<(string Type, string DisplayName, string? Detail)> _seenAtWatermark = new();
+    // High-water mark of the newest activity event id already surfaced (live or backfilled),
+    // so a post-reconnect backfill from GET /api/companion/events/recent doesn't re-raise
+    // ActivityReceived for events already delivered live before the drop. CompanionActivityEvent.Id
+    // is the bot's streamer_event_log.id, assigned in strictly increasing insertion order, so a
+    // plain high-water mark is exact -- unlike the OccurredAt-based heuristic this replaced
+    // (second-precision timestamps can't tell two distinct same-second events apart).
+    private long _lastActivityEventId;
 
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
     public event EventHandler<CompanionActivityEvent>? ActivityReceived;
@@ -220,7 +218,7 @@ public sealed class CompanionEventStream
             return;
         }
 
-        foreach (CompanionActivityEvent activity in parsed.Events.Where(IsValidActivity).OrderBy(e => e.OccurredAt))
+        foreach (CompanionActivityEvent activity in parsed.Events.Where(IsValidActivity).OrderBy(e => e.Id))
         {
             if (MarkSeen(activity))
             {
@@ -285,39 +283,26 @@ public sealed class CompanionEventStream
         activity is not null
         && ActivityEventTypes.Contains(activity.Type)
         && !string.IsNullOrWhiteSpace(activity.DisplayName)
-        && activity.OccurredAt != default;
+        && activity.OccurredAt != default
+        && activity.Id > 0;
 
     /// <summary>
-    /// Records <paramref name="activity"/> against the watermark shared by both live and
-    /// backfilled dispatch, returning whether it's newer than (or not previously recorded at)
-    /// that watermark. Both <see cref="HandleActivityEvent"/> and
-    /// <see cref="FetchRecentActivityAsync"/> only raise <see cref="ActivityReceived"/> when
-    /// this returns true, so the same activity arriving via both paths (the backfill request
-    /// races the live SSE connection) is only delivered once.
+    /// Records <paramref name="activity"/> against the id high-water mark shared by both live
+    /// and backfilled dispatch, returning whether its id is newer than any seen so far. Both
+    /// <see cref="HandleActivityEvent"/> and <see cref="FetchRecentActivityAsync"/> only raise
+    /// <see cref="ActivityReceived"/> when this returns true, so the same activity arriving via
+    /// both paths (the backfill request races the live SSE connection) is only delivered once.
     /// </summary>
     private bool MarkSeen(CompanionActivityEvent activity)
     {
-        if (activity.OccurredAt > _lastActivitySeenAt)
+        if (activity.Id <= _lastActivityEventId)
         {
-            _lastActivitySeenAt = activity.OccurredAt;
-            _seenAtWatermark.Clear();
-            _seenAtWatermark.Add(ActivitySignature(activity));
-            return true;
+            return false;
         }
 
-        if (activity.OccurredAt == _lastActivitySeenAt)
-        {
-            return _seenAtWatermark.Add(ActivitySignature(activity));
-        }
-
-        return false;
+        _lastActivityEventId = activity.Id;
+        return true;
     }
-
-    // A structural tuple, rather than a concatenated string, so no field value (however
-    // unlikely) can make two distinct activities collide into the same signature, and so
-    // a null Detail stays distinguishable from an empty one.
-    private static (string Type, string DisplayName, string? Detail) ActivitySignature(CompanionActivityEvent activity) =>
-        (activity.Type, activity.DisplayName, activity.Detail);
 
     private void HandleRedemptionEvent(string data)
     {

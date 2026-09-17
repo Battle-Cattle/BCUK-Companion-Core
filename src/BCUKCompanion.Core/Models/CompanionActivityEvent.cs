@@ -14,6 +14,15 @@ public sealed class CompanionActivityEvent
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Stable identifier (the bot's <c>streamer_event_log.id</c>), unique across both this
+    /// live SSE push and the <c>/api/companion/events/recent</c> backfill response — lets
+    /// <see cref="Events.CompanionEventStream"/> dedupe/order events exactly instead of by an
+    /// <see cref="OccurredAt"/>-based heuristic.
+    /// </summary>
+    [JsonPropertyName("id")]
+    public long Id { get; set; }
+
     [JsonPropertyName("displayName")]
     public string DisplayName { get; set; } = string.Empty;
 
