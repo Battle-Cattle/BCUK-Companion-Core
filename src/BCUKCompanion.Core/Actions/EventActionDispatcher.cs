@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BCUKCompanion.Core.Models;
 
 namespace BCUKCompanion.Core.Actions;
@@ -53,6 +54,47 @@ public sealed class EventActionDispatcher(
 
         return new EventDispatchResult(rewardTitle, results);
     }
+
+    /// <summary>
+    /// Fire-and-forget: runs <see cref="DispatchAsync(BotEventArgs, CancellationToken)"/> on a
+    /// background thread and reports failures via <paramref name="showBalloon"/> — a dispatch
+    /// that throws (a crash) and one that completed but had unsuccessful actions (a wrong
+    /// device IP, an offline light, a disconnected treadmill, ...) alike — so they're visible
+    /// even in a Release build, where <see cref="Debug.WriteLine"/> alone is compiled out.
+    /// A null result (not a redemption event, or no mappings matched it) and a result with
+    /// zero matching actions are not reported.
+    /// </summary>
+    public void DispatchAndReportAsync(BotEventArgs botEvent, Action<string, string>? showBalloon)
+    {
+        var dispatch = Task.Run(() => DispatchAsync(botEvent));
+
+        dispatch.ContinueWith(
+            t => Debug.WriteLine($"Action dispatch failed: {t.Exception}"),
+            TaskContinuationOptions.OnlyOnFaulted);
+        dispatch.ContinueWith(
+            t => showBalloon?.Invoke("Action dispatch crashed", DescribeFault(t.Exception)),
+            TaskContinuationOptions.OnlyOnFaulted);
+        dispatch.ContinueWith(
+            t => ReportDispatchFailure(t.Result, "Action failed", showBalloon),
+            TaskContinuationOptions.OnlyOnRanToCompletion);
+    }
+
+    private static void ReportDispatchFailure(
+        EventDispatchResult? result, string balloonTitle, Action<string, string>? showBalloon)
+    {
+        if (result is null || result.ActionResults.Count == 0 || result.AllSucceeded)
+        {
+            return;
+        }
+
+        var detail = string.Join(
+            "; ",
+            result.ActionResults.Where(r => !r.Success).Select(r => r.ErrorMessage ?? "Action failed."));
+        showBalloon?.Invoke(balloonTitle, detail);
+    }
+
+    private static string DescribeFault(AggregateException? exception) =>
+        exception?.Flatten().InnerException?.Message ?? "Unknown error.";
 
     private static async Task<EventActionResult> ExecuteActionAsync(
         IEventAction action, IEventActionContext context, CancellationToken cancellationToken)
