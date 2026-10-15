@@ -64,4 +64,25 @@ public sealed class EventActionConfigStoreTests : IDisposable
         Assert.Empty(config.Mappings);
         Assert.True(File.Exists(store.ConfigFilePath + ".bak"));
     }
+
+    [Fact]
+    public void Save_ThenLoad_RoundTripsCommandMappingsAsAString()
+    {
+        store.Save(new TestConfig { Mappings = [new EventActionMapping("Lights", [], EventActionTriggerKind.Command)] });
+
+        Assert.Contains("\"TriggerKind\": \"Command\"", File.ReadAllText(store.ConfigFilePath));
+        Assert.Equal(EventActionTriggerKind.Command, Assert.Single(store.Load().Mappings).TriggerKind);
+    }
+
+    [Fact]
+    public void Load_ConfigSavedBeforeTriggerKinds_DefaultsToReward()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(store.ConfigFilePath)!);
+        File.WriteAllText(store.ConfigFilePath, """{"Mappings":[{"RewardTitle":"Hydrate!","Actions":[]}]}""");
+
+        var mapping = Assert.Single(store.Load().Mappings);
+
+        Assert.Equal("Hydrate!", mapping.RewardTitle);
+        Assert.Equal(EventActionTriggerKind.Reward, mapping.TriggerKind);
+    }
 }

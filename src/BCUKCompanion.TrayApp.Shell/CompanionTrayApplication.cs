@@ -1,5 +1,6 @@
 using System.Windows;
 using BCUKCompanion.Core;
+using BCUKCompanion.Core.Actions;
 using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
 using BCUKCompanion.Core.Tokens;
@@ -142,6 +143,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
         _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
         _companionClient.Events.ActivityReceived -= OnActivityReceived;
+        _companionClient.Events.AdvancedCommandReceived -= OnAdvancedCommandReceived;
         _companionClient.Events.ConnectionStateChanged -= OnConnectionStateChanged;
         _companionClient.ListenLoopFaulted -= OnListenLoopFaulted;
         _companionClient.Dispose();
@@ -163,6 +165,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         var client = new CompanionClient(botHost, new DpapiFileTokenStore(AppPaths.TokenFile));
         client.Events.RedemptionReceived += OnRedemptionReceived;
         client.Events.ActivityReceived += OnActivityReceived;
+        client.Events.AdvancedCommandReceived += OnAdvancedCommandReceived;
         client.Events.ConnectionStateChanged += OnConnectionStateChanged;
         client.ListenLoopFaulted += OnListenLoopFaulted;
 
@@ -242,6 +245,93 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                 // Host-supplied callback — don't let it take down the shared tray process.
             }
         });
+    }
+
+    private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command)
+    {
+        // Captured now: a bot-host change can replace _companionClient while the actions run,
+        // and the acknowledgement must go to the host the event came from.
+        CompanionClient client = _companionClient;
+        _ = Dispatcher.InvokeAsync(async () =>
+        {
+            string text = command.Source == "streamdeck"
+                ? "Triggered from Stream Deck"
+                : $"Used by {(string.IsNullOrEmpty(command.UserName) ? command.UserLogin : command.UserName)}";
+            _trayIcon.ShowBalloon(command.CommandName, text);
+
+            BotEventArgs botEvent = BuildCommandEventArgs(command);
+            try
+            {
+                _options.OnBotEvent?.Invoke(botEvent);
+            }
+            catch (Exception)
+            {
+                // Host-supplied callback — don't let it take down the shared tray process.
+            }
+
+            (bool ok, string? error) = await RunCommandActionsAsync(botEvent).ConfigureAwait(true);
+            if (!command.AckRequired)
+            {
+                return;
+            }
+
+            try
+            {
+                await client.AckAdvancedCommandAsync(command.Id, ok, error).ConfigureAwait(true);
+            }
+            catch (Exception)
+            {
+                // Couldn't reach the bot: it refunds the viewer once its acknowledgement timeout
+                // passes, which is the right outcome when we can't say the command ran.
+            }
+        });
+    }
+
+    /// <summary>
+    /// Awaits the host's <see cref="CompanionTrayAppOptions.OnBotEventAsync"/> for a command and
+    /// turns its result into the acknowledgement to send.
+    /// </summary>
+    private async Task<(bool Ok, string? Error)> RunCommandActionsAsync(BotEventArgs botEvent)
+    {
+        if (_options.OnBotEventAsync is not { } handler)
+        {
+            return AdvancedCommandAck.FromDispatchResult(null);
+        }
+
+        try
+        {
+            return AdvancedCommandAck.FromDispatchResult(await handler(botEvent).ConfigureAwait(true));
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// The <c>command.triggered</c> event handed to the host. Each command parameter is added as
+    /// <c>param.&lt;key&gt;</c>, so actions can read them from the event's metadata.
+    /// </summary>
+    private static BotEventArgs BuildCommandEventArgs(AdvancedCommandEvent command)
+    {
+        var metadata = new Dictionary<string, string?>
+        {
+            ["eventId"] = command.Id,
+            ["commandId"] = command.CommandId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["commandName"] = command.CommandName,
+            ["source"] = command.Source,
+            ["userLogin"] = command.UserLogin,
+            ["userName"] = command.UserName,
+            ["args"] = command.Args,
+            ["pointsSpent"] = command.PointsSpent.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["triggeredAt"] = command.TriggeredAt.ToString("o"),
+        };
+        foreach (var (key, value) in command.Parameters ?? [])
+        {
+            metadata[$"param.{key}"] = value;
+        }
+
+        return new BotEventArgs(EventActionDispatcher.CommandEventName, metadata);
     }
 
     private void OnConnectionStateChanged(object? sender, CompanionConnectionState state)

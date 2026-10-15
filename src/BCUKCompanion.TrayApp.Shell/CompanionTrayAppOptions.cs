@@ -1,4 +1,5 @@
 using BCUKCompanion.Core;
+using BCUKCompanion.Core.Actions;
 using BCUKCompanion.Core.Models;
 
 namespace BCUKCompanion.TrayApp;
@@ -19,6 +20,16 @@ public sealed class CompanionTrayAppOptions
     /// logic itself.
     /// </summary>
     public Action<BotEventArgs>? OnBotEvent { get; init; }
+
+    /// <summary>
+    /// Invoked on the UI thread for each bot event, after <see cref="OnBotEvent"/>, and awaited:
+    /// return the result of running the event's mapped actions (typically
+    /// <see cref="EventActionDispatcher.DispatchAsync(BotEventArgs, CancellationToken)"/>). For an
+    /// advanced command (<c>command.triggered</c>) that needs an acknowledgement, the shell reports
+    /// the result back to the bot — anything but every mapped action succeeding refunds the
+    /// viewer, and so does leaving this unset, since then nothing ran the command.
+    /// </summary>
+    public Func<BotEventArgs, Task<EventDispatchResult?>>? OnBotEventAsync { get; init; }
 
     /// <summary>
     /// Extra entries shown in the tray icon's context menu, letting a companion app surface

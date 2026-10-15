@@ -88,11 +88,27 @@ CompanionTrayApplication.Run(new CompanionTrayAppOptions
 
 - `OnBotEvent` is invoked on the UI thread whenever the bot host reports an
   event. `BotEventArgs.EventName` is a stable identifier for the kind of
-  event (currently only `"redemption.received"`, for a channel-point
-  redemption) — branch on it rather than on any display text, since Core
-  may add more event kinds over time. `Metadata` carries the event's
-  details: for `"redemption.received"` that's `rewardId`, `rewardTitle`,
-  `userLogin`, `userName`, `userInput`, and `redeemedAt`.
+  event — branch on it rather than on any display text, since Core may add
+  more event kinds over time. `Metadata` carries the event's details:
+  - `"redemption.received"` (channel-point redemption): `rewardId`,
+    `rewardTitle`, `userLogin`, `userName`, `userInput`, `redeemedAt`.
+  - `"activity.received"` (follow/sub/...): `type`, `displayName`,
+    `detail`, `occurredAt`.
+  - `"command.triggered"` (advanced command): `eventId`, `commandId`,
+    `commandName`, `source` (`chat`/`streamdeck`), `userLogin`, `userName`,
+    `args`, `pointsSpent`, `triggeredAt`, plus `param.<key>` for each of the
+    command's parameters.
+- `OnBotEventAsync` is awaited after `OnBotEvent`; return the result of
+  running the event's actions (usually
+  `EventActionDispatcher.DispatchAsync(e)`). For an advanced command the
+  shell acknowledges it to the bot from that result — anything but every
+  mapped action succeeding (including no mapping, or leaving this unset)
+  refunds the viewer.
+- `EventActionMapping.TriggerKind` decides whether a mapping matches a
+  reward title (`Reward`, the default — configs saved before this field
+  existed load as rewards) or an advanced command name (`Command`); the
+  mappings window has a selector for it. Actions can read the event being
+  dispatched with `context.GetService<BotEventArgs>()`.
 - `AdditionalMenuItems` are appended to the shared tray icon's context
   menu (above "Exit"), so a companion app can surface its own settings
   window from the existing tray icon instead of a command-line flag.

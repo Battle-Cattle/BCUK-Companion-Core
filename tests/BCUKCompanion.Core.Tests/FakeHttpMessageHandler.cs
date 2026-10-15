@@ -13,19 +13,22 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
     public HttpRequestMessage? LastRequest { get; private set; }
 
+    /// <summary>The last request's body, read before the client disposes it (null for no body).</summary>
+    public string? LastRequestBody { get; private set; }
+
     public FakeHttpMessageHandler(HttpStatusCode statusCode, string body)
     {
         _statusCode = statusCode;
         _body = body;
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         LastRequest = request;
-        var response = new HttpResponseMessage(_statusCode)
+        LastRequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+        return new HttpResponseMessage(_statusCode)
         {
             Content = new StringContent(_body),
         };
-        return Task.FromResult(response);
     }
 }

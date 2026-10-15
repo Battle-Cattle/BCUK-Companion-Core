@@ -4,7 +4,7 @@ using BCUKCompanion.Core.Models;
 namespace BCUKCompanion.Core.Actions;
 
 /// <summary>
-/// Matches a redemption event to its configured actions and runs them in order, reporting a
+/// Matches a redemption (by reward title) or advanced command (by command name) event to its configured actions and runs them in order, reporting a
 /// result per action. Core has no knowledge of what any individual <see cref="IEventAction"/>
 /// does — apps contribute their own kinds (see <see cref="EventActionTypeRegistry"/>) and supply
 /// whatever those kinds need via <see cref="IEventActionContext"/>.
@@ -14,36 +14,58 @@ public sealed class EventActionDispatcher(
     Func<IEventActionContext> contextProvider)
 {
     // Core contract values from BCUKCompanion.Core.Models.BotEventArgs, not arbitrary choices.
-    private const string RedemptionEventName = "redemption.received";
+    public const string RedemptionEventName = "redemption.received";
+    public const string CommandEventName = "command.triggered";
     private const string RewardTitleMetadataKey = "rewardTitle";
+    private const string CommandNameMetadataKey = "commandName";
 
+    /// <summary>
+    /// Runs the actions mapped to a redemption (by its <c>rewardTitle</c>) or an advanced command
+    /// (by its <c>commandName</c>). The event itself is available to the actions as
+    /// <c>context.GetService&lt;BotEventArgs&gt;()</c>.
+    /// </summary>
+    /// <returns>The per-action results, or null if the event isn't one mappings apply to.</returns>
     public async Task<EventDispatchResult?> DispatchAsync(BotEventArgs botEvent, CancellationToken cancellationToken = default)
     {
-        if (botEvent.EventName != RedemptionEventName
-            || !botEvent.Metadata.TryGetValue(RewardTitleMetadataKey, out var rewardTitle)
-            || string.IsNullOrEmpty(rewardTitle))
+        var (kind, key) = botEvent.EventName switch
+        {
+            RedemptionEventName => (EventActionTriggerKind.Reward, RewardTitleMetadataKey),
+            CommandEventName => (EventActionTriggerKind.Command, CommandNameMetadataKey),
+            _ => (EventActionTriggerKind.Reward, null),
+        };
+        if (key is null || !botEvent.Metadata.TryGetValue(key, out var name) || string.IsNullOrEmpty(name))
         {
             return null;
         }
 
-        return await DispatchAsync(rewardTitle, cancellationToken).ConfigureAwait(false);
+        return await DispatchAsync(name, kind, botEvent, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<EventDispatchResult> DispatchAsync(string rewardTitle, CancellationToken cancellationToken = default)
+    /// <summary>Runs the actions mapped to a reward title (e.g. a settings window's Test button).</summary>
+    public Task<EventDispatchResult> DispatchAsync(string rewardTitle, CancellationToken cancellationToken = default)
+        => DispatchAsync(rewardTitle, EventActionTriggerKind.Reward, null, cancellationToken);
+
+    /// <summary>Runs the actions mapped to a reward title or command name.</summary>
+    /// <param name="name">The reward title or command name, matched case-insensitively.</param>
+    /// <param name="kind">Which kind of mapping to match.</param>
+    /// <param name="botEvent">The event being dispatched, exposed to actions; null for a test run.</param>
+    /// <param name="cancellationToken">Cancels the remaining actions.</param>
+    public async Task<EventDispatchResult> DispatchAsync(
+        string name, EventActionTriggerKind kind, BotEventArgs? botEvent = null, CancellationToken cancellationToken = default)
     {
         var mappings = mappingsProvider();
 
         var actions = mappings
-            .Where(m => string.Equals(m.RewardTitle, rewardTitle, StringComparison.OrdinalIgnoreCase))
+            .Where(m => m.TriggerKind == kind && string.Equals(m.RewardTitle, name, StringComparison.OrdinalIgnoreCase))
             .SelectMany(m => m.Actions)
             .ToList();
 
         if (actions.Count == 0)
         {
-            return new EventDispatchResult(rewardTitle, []);
+            return new EventDispatchResult(name, []);
         }
 
-        var context = contextProvider();
+        var context = botEvent is null ? contextProvider() : new BotEventActionContext(botEvent, contextProvider());
 
         // Sequential, not parallel: a Delay action only delays the actions queued after it.
         var results = new List<EventActionResult>(actions.Count);
@@ -52,7 +74,7 @@ public sealed class EventActionDispatcher(
             results.Add(await ExecuteActionAsync(action, context, cancellationToken).ConfigureAwait(false));
         }
 
-        return new EventDispatchResult(rewardTitle, results);
+        return new EventDispatchResult(name, results);
     }
 
     /// <summary>
