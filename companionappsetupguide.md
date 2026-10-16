@@ -160,6 +160,22 @@ Behavior:
   data: {"type":"channel_points_redemption","rewardId":"...","rewardTitle":"...","userLogin":"...","userName":"...","userInput":"...","redeemedAt":"2026-06-27T12:34:56.000Z"}
 
   ```
+- Sends an `advanced_command` event whenever one of the streamer's advanced
+  commands (managed on the bot's `/advanced-commands` page) is used — from
+  chat, where the viewer paid loyalty points, or free from the streamer's
+  Stream Deck:
+  ```
+  data: {"type":"advanced_command","id":"<uuid>","commandId":7,"commandName":"Hydrate","source":"chat","userLogin":"viewer","userName":"Viewer","args":"text after the trigger","pointsSpent":100,"parameters":{"color":"red"},"ackRequired":true,"triggeredAt":"2026-06-27T12:34:56.000Z"}
+
+  ```
+  `source` is `"chat"` or `"streamdeck"` (`userLogin`/`userName` are null
+  for the Stream Deck). `parameters` are key/value pairs the streamer set on
+  the command. When `ackRequired` is true the app **must** acknowledge the
+  event (see below) — the viewer is refunded if it reports a failure or
+  doesn't answer within 30 seconds, and immediately if no companion app is
+  connected at all.
+- Also sends follow/sub/resub/giftsub/raid activity events (`type` is the
+  activity, plus `id`, `displayName`, `detail` and `occurredAt`).
 - `401` if the bearer token is missing/invalid/revoked — the app should stop
   and prompt the user to re-authenticate (the page/manual flow above) in
   that case.
@@ -170,6 +186,18 @@ Behavior:
 - The app should implement reconnect-with-backoff if the connection drops
   (standard SSE client behavior — most SSE/EventSource libraries do this
   automatically).
+
+## Other endpoints
+
+All take the same `Authorization: Bearer <token>` header and answer with an
+`{ "ok": true, ... }` envelope.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/companion/events/recent` | Activity events (not redemptions or commands) missed while disconnected — call after each reconnect |
+| `GET /api/companion/rewards` | The streamer's Twitch channel-point rewards: `id`, `title`, `prompt`, `cost`, `backgroundColor`, `isEnabled`, `isUserInputRequired` |
+| `GET /api/companion/commands` | The streamer's advanced commands: `id`, `name`, `trigger`, `pointCost`, `isEnabled`, `companionEnabled`, `parameters` |
+| `POST /api/companion/commands/ack` | Body `{"eventId":"<id>","ok":true\|false,"error":"optional text"}`. Reports whether the app ran an `advanced_command` event's actions; `ok: false` refunds the viewer. Responds `{ "ok": true, "resolved": false }` if the bot had already resolved the use (e.g. timed out), and `404` for another streamer's or an unknown event |
 
 ## Error reference
 

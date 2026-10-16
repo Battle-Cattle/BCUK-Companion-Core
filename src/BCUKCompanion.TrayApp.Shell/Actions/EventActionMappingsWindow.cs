@@ -51,6 +51,17 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     protected readonly ListBox MappingsList = new() { Margin = new Thickness(0, 0, 0, 8), MinHeight = 200 };
     protected readonly ListBox ActionsList = new() { Margin = new Thickness(0, 0, 0, 8), MinHeight = 160 };
     protected readonly ComboBox RewardTitleCombo = new() { IsEditable = true, Margin = new Thickness(0, 0, 0, 8) };
+
+    /// <summary>Whether a new mapping matches a channel-point reward or an advanced command.</summary>
+    protected readonly ComboBox TriggerKindCombo = new()
+    {
+        ItemsSource = Enum.GetValues<EventActionTriggerKind>(),
+        SelectedIndex = 0,
+        Margin = new Thickness(0, 0, 0, 8),
+    };
+
+    private EventActionTriggerKind SelectedKind =>
+        TriggerKindCombo.SelectedItem is EventActionTriggerKind kind ? kind : EventActionTriggerKind.Reward;
     protected readonly TextBlock StatusText = new() { Margin = new Thickness(12, 0, 12, 12) };
     protected readonly Button SaveButton = new() { Content = "Save", Width = 90, HorizontalAlignment = HorizontalAlignment.Right };
 
@@ -89,6 +100,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     {
         MappingsList.ItemsSource = Mappings;
         MappingsList.SelectionChanged += (_, _) => RefreshActionsList();
+        TriggerKindCombo.SelectionChanged += (_, _) => RefreshRewardTitleSuggestions();
 
         var addMappingButton = new Button { Content = "Add Mapping", Width = 100, Margin = new Thickness(0, 0, 8, 0) };
         addMappingButton.Click += (_, _) => OnAddMapping();
@@ -109,7 +121,9 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             Width = 220,
             Children =
             {
-                new TextBlock { Text = "Reward title" },
+                new TextBlock { Text = "Trigger" },
+                TriggerKindCombo,
+                new TextBlock { Text = "Reward title / command name" },
                 RewardTitleCombo,
                 mappingButtonsPanel,
                 new TextBlock { Text = "Mappings" },
@@ -166,22 +180,47 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         // then still pass the sequence check and overwrite these (correct) local-only
         // suggestions with its now-stale server result.
         int sequence = ++_rewardTitleRefreshSequence;
-        RewardTitleCombo.ItemsSource = Mappings.Select(m => m.RewardTitle).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var kind = SelectedKind;
+        RewardTitleCombo.ItemsSource = MappedNames(kind).ToList();
 
         // Best-effort enhancement: if we have a logged-in companion client, replace the
-        // local-only suggestion list above with the live reward catalog once it arrives.
+        // local-only suggestion list above with the live reward (or command) catalog once it arrives.
         if (getCompanionClient?.Invoke() is { IsLoggedIn: true } client)
         {
-            _ = RefreshRewardTitleSuggestionsFromServerAsync(client, sequence);
+            _ = RefreshRewardTitleSuggestionsFromServerAsync(client, kind, sequence);
         }
     }
 
-    private async Task RefreshRewardTitleSuggestionsFromServerAsync(CompanionClient client, int sequence)
+    /// <summary>The names already used by mappings of <paramref name="kind"/>.</summary>
+    private IEnumerable<string> MappedNames(EventActionTriggerKind kind) =>
+        Mappings.Where(m => m.TriggerKind == kind).Select(m => m.RewardTitle).Distinct(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Fetches the live names for <paramref name="kind"/>: enabled reward titles, or the
+    /// advanced commands that send events to this app.
+    /// </summary>
+    private static async Task<IEnumerable<string>> FetchNamesAsync(CompanionClient client, EventActionTriggerKind kind)
     {
-        IReadOnlyList<Reward> rewards;
+        if (kind == EventActionTriggerKind.Command)
+        {
+            IReadOnlyList<AdvancedCommand> commands = await client.GetAdvancedCommandsAsync().ConfigureAwait(true);
+            return commands.Where(c => c.CompanionEnabled).Select(c => c.Name);
+        }
+
+        IReadOnlyList<Reward> rewards = await client.GetRewardsAsync().ConfigureAwait(true);
+        return rewards.Where(r => r.IsEnabled).Select(r => r.Title);
+    }
+
+    /// <summary>
+    /// Replaces the title suggestions with the server's rewards or commands (per <paramref name="kind"/>) plus the
+    /// already-mapped names, unless the fetch fails or a newer refresh (<paramref name="sequence"/>) has started.
+    /// </summary>
+    private async Task RefreshRewardTitleSuggestionsFromServerAsync(CompanionClient client, EventActionTriggerKind kind, int sequence)
+    {
+        IEnumerable<string> names;
         try
         {
-            rewards = await client.GetRewardsAsync().ConfigureAwait(true);
+            names = await FetchNamesAsync(client, kind).ConfigureAwait(true);
         }
         catch (Exception)
         {
@@ -198,10 +237,8 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             return;
         }
 
-        var titles = rewards
-            .Where(r => r.IsEnabled)
-            .Select(r => r.Title)
-            .Concat(Mappings.Select(m => m.RewardTitle))
+        var titles = names
+            .Concat(MappedNames(kind))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -235,18 +272,20 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         var title = RewardTitleCombo.Text.Trim();
         if (string.IsNullOrEmpty(title))
         {
-            StatusText.Text = "Enter a reward title first.";
+            StatusText.Text = "Enter a reward title or command name first.";
             return;
         }
 
-        var existing = Mappings.FirstOrDefault(m => string.Equals(m.RewardTitle, title, StringComparison.OrdinalIgnoreCase));
+        var kind = SelectedKind;
+        var existing = Mappings.FirstOrDefault(m =>
+            m.TriggerKind == kind && string.Equals(m.RewardTitle, title, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
         {
             MappingsList.SelectedItem = existing;
             return;
         }
 
-        var mapping = new EventActionMapping(title, []);
+        var mapping = new EventActionMapping(title, [], kind);
         Mappings.Add(mapping);
         MappingsList.SelectedItem = mapping;
         RefreshRewardTitleSuggestions();
@@ -343,7 +382,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             // BuildContext() run outside EventActionDispatcher's own per-action try/catch, and
             // a subclass's Describe() override is equally unguarded) would otherwise crash the
             // process instead of just failing this one test run.
-            result = await dispatcher.DispatchAsync(mapping.RewardTitle).ConfigureAwait(true);
+            result = await dispatcher.DispatchAsync(mapping.RewardTitle, mapping.TriggerKind).ConfigureAwait(true);
 
             if (result.ActionResults.Count == 0)
             {

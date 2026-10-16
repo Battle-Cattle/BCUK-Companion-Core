@@ -29,8 +29,16 @@ public sealed class CompanionEventStream
     // (second-precision timestamps can't tell two distinct same-second events apart).
     private long _lastActivityEventId;
 
+    // Recently delivered advanced command event ids. Their ids are UUIDs (no ordering to keep a
+    // high-water mark on), so a small bounded window guards against the same use being raised
+    // twice — which would run its actions (and acknowledge) twice.
+    private const int SeenCommandEventCapacity = 256;
+    private readonly HashSet<string> _seenCommandEventIds = new(StringComparer.Ordinal);
+    private readonly Queue<string> _seenCommandEventOrder = new();
+
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
     public event EventHandler<CompanionActivityEvent>? ActivityReceived;
+    public event EventHandler<AdvancedCommandEvent>? AdvancedCommandReceived;
     public event EventHandler<CompanionConnectionState>? ConnectionStateChanged;
 
     public CompanionEventStream(HttpClient httpClient, Uri botHost)
@@ -248,6 +256,10 @@ public sealed class CompanionEventStream
         {
             HandleRedemptionEvent(sseEvent.Data);
         }
+        else if (type == "advanced_command")
+        {
+            HandleAdvancedCommandEvent(sseEvent.Data);
+        }
 
         // Any other type is ignored for forward compatibility.
     }
@@ -328,6 +340,49 @@ public sealed class CompanionEventStream
         {
             RedemptionReceived?.Invoke(this, redemption);
         }
+    }
+
+    /// <summary>Parses an <c>advanced_command</c> frame and raises <see cref="AdvancedCommandReceived"/> once per complete, unseen event.</summary>
+    private void HandleAdvancedCommandEvent(string data)
+    {
+        AdvancedCommandEvent? command;
+        try
+        {
+            command = JsonSerializer.Deserialize<AdvancedCommandEvent>(data);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (command is not null && IsComplete(command) && MarkCommandSeen(command.Id))
+        {
+            AdvancedCommandReceived?.Invoke(this, command);
+        }
+    }
+
+    /// <summary>Whether an advanced command event has the fields a handler relies on (id, name, a known source, a timestamp).</summary>
+    private static bool IsComplete(AdvancedCommandEvent command) =>
+        !string.IsNullOrWhiteSpace(command.Id)
+        && !string.IsNullOrWhiteSpace(command.CommandName)
+        && command.Source is "chat" or "streamdeck"
+        && command.TriggeredAt != default;
+
+    /// <summary>Records an advanced command event id, returning false if it was already delivered.</summary>
+    private bool MarkCommandSeen(string eventId)
+    {
+        if (!_seenCommandEventIds.Add(eventId))
+        {
+            return false;
+        }
+
+        _seenCommandEventOrder.Enqueue(eventId);
+        if (_seenCommandEventOrder.Count > SeenCommandEventCapacity)
+        {
+            _seenCommandEventIds.Remove(_seenCommandEventOrder.Dequeue());
+        }
+
+        return true;
     }
 
     private sealed class RecentActivityResponse

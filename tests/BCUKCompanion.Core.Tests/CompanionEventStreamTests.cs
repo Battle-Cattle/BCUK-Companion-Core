@@ -241,6 +241,68 @@ public class CompanionEventStreamTests
         Assert.Equal(1, handler.InvocationCount);
     }
 
+    [Fact]
+    public async Task RaisesAdvancedCommandReceivedOncePerEventId()
+    {
+        const string sse = """
+            data: {"type":"advanced_command","id":"e1","commandId":7,"commandName":"Hydrate","source":"chat","userLogin":"alice","userName":"Alice","args":"now","pointsSpent":100,"parameters":{"color":"red"},"ackRequired":true,"triggeredAt":"2026-01-01T00:00:00Z"}
+
+            data: {"type":"advanced_command","id":"e1","commandId":7,"commandName":"Hydrate","source":"chat","userLogin":"alice","userName":"Alice","args":"now","pointsSpent":100,"parameters":{"color":"red"},"ackRequired":true,"triggeredAt":"2026-01-01T00:00:00Z"}
+
+            data: {"type":"advanced_command","id":"e2","commandId":7,"commandName":"Hydrate","source":"streamdeck","userLogin":null,"userName":null,"args":null,"pointsSpent":0,"parameters":{},"ackRequired":true,"triggeredAt":"2026-01-01T00:00:01Z"}
+
+            """;
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var received = new List<AdvancedCommandEvent>();
+        stream.AdvancedCommandReceived += (_, e) => received.Add(e);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => received.Count >= 2, TestTimeout);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        Assert.Equal(["e1", "e2"], received.Select(e => e.Id));
+        Assert.Equal("Hydrate", received[0].CommandName);
+        Assert.Equal("red", received[0].Parameters!["color"]);
+        Assert.True(received[0].AckRequired);
+        Assert.Null(received[1].UserLogin);
+    }
+
+    [Fact]
+    public async Task IgnoresIncompleteAdvancedCommandPayloads()
+    {
+        const string sse = """
+            data: {"type":"advanced_command","id":"","commandName":"Hydrate","source":"chat","triggeredAt":"2026-01-01T00:00:00Z"}
+
+            data: {"type":"advanced_command","id":"e1","commandName":"Hydrate","source":"somewhere","triggeredAt":"2026-01-01T00:00:00Z"}
+
+            data: {"type":"advanced_command","id":"e2","commandName":"","source":"chat","triggeredAt":"2026-01-01T00:00:00Z"}
+
+            data: {"type":"advanced_command", not json
+
+            data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"t","userLogin":"u","userName":"U","redeemedAt":"2026-01-01T00:00:00Z"}
+
+            """;
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var commandRaised = false;
+        stream.AdvancedCommandReceived += (_, _) => commandRaised = true;
+        RedemptionEvent? redemption = null;
+        stream.RedemptionReceived += (_, e) => redemption = e;
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => redemption is not null, TestTimeout);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        Assert.False(commandRaised);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);
