@@ -60,11 +60,23 @@ internal sealed class TrayIconController : IDisposable
         _notifyIcon.Text = tooltipText.Length <= 63 ? tooltipText : tooltipText[..63];
     }
 
+    /// <summary>
+    /// Best-effort: never throws, so a balloon can't break the event handling around it.
+    /// ShowBalloonTip rejects empty text (e.g. an activity with no display name or detail),
+    /// so that falls back to the title.
+    /// </summary>
     public void ShowBalloon(string title, string text)
     {
-        _notifyIcon.BalloonTipTitle = title;
-        _notifyIcon.BalloonTipText = text;
-        _notifyIcon.ShowBalloonTip(5000);
+        try
+        {
+            _notifyIcon.BalloonTipTitle = title;
+            _notifyIcon.BalloonTipText = string.IsNullOrEmpty(text) ? title : text;
+            _notifyIcon.ShowBalloonTip(5000);
+        }
+        catch (Exception)
+        {
+            // Balloons are notifications only; losing one must not affect anything else.
+        }
     }
 
     public void Dispose()

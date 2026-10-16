@@ -71,14 +71,18 @@ this repo.
 
 ### Reacting to bot events and adding your own settings UI
 
-`CompanionTrayAppOptions` exposes two generic extension points so a
-companion app can plug in its own logic without owning any bot-connection
-or tray-icon code itself:
+`CompanionTrayAppOptions` lets a companion app plug in its own actions and
+settings UI without owning any bot-connection, dispatch or tray-icon code
+itself:
 
 ```csharp
 CompanionTrayApplication.Run(new CompanionTrayAppOptions
 {
-    OnBotEvent = e => myDispatcher.DispatchAsync(e.EventName, e.Metadata),
+    CreateEventActionDispatcher = () =>
+    {
+        var config = myStore.Load();
+        return new EventActionDispatcher(() => config.Mappings, () => new MyActionContext(config));
+    },
     AdditionalMenuItems = new[]
     {
         new TrayMenuItem("My Settings...", () => ShowMySettingsWindow())
@@ -86,8 +90,15 @@ CompanionTrayApplication.Run(new CompanionTrayAppOptions
 });
 ```
 
-- `OnBotEvent` is invoked on the UI thread whenever the bot host reports an
-  event. `BotEventArgs.EventName` is a stable identifier for the kind of
+- `CreateEventActionDispatcher` builds the dispatcher for each bot event (on
+  a background thread, so it can load the latest saved config). The shell
+  then handles every redemption and advanced command the same way: it runs
+  the matched actions, shows a tray balloon for any that fail, and
+  acknowledges advanced commands from the result. The app only registers its
+  own action kinds (`EventActionTypeRegistry`) and supplies the context they
+  need.
+- `OnBotEvent` is invoked on the UI thread for every bot event, before any
+  actions run. `BotEventArgs.EventName` is a stable identifier for the kind of
   event — branch on it rather than on any display text, since Core may add
   more event kinds over time. `Metadata` carries the event's details:
   - `"redemption.received"` (channel-point redemption): `rewardId`,
@@ -98,12 +109,12 @@ CompanionTrayApplication.Run(new CompanionTrayAppOptions
     `commandName`, `source` (`chat`/`streamdeck`), `userLogin`, `userName`,
     `args`, `pointsSpent`, `triggeredAt`, plus `param.<key>` for each of the
     command's parameters.
-- `OnBotEventAsync` is awaited after `OnBotEvent`; return the result of
-  running the event's actions (usually
-  `EventActionDispatcher.DispatchAsync(e)`). For an advanced command the
-  shell acknowledges it to the bot from that result — anything but every
-  mapped action succeeding (including no mapping, or leaving this unset)
-  refunds the viewer.
+- `OnBotEventAsync` is awaited after `OnBotEvent` for every bot event. It's
+  only needed by apps that run their own dispatch instead of setting
+  `CreateEventActionDispatcher`. In that case, return the result of running
+  the event's actions, and the shell acknowledges advanced commands from it:
+  anything but every mapped action succeeding (including no mapping, or
+  leaving both unset) refunds the viewer.
 - `EventActionMapping.TriggerKind` decides whether a mapping matches a
   reward title (`Reward`, the default — configs saved before this field
   existed load as rewards) or an advanced command name (`Command`); the

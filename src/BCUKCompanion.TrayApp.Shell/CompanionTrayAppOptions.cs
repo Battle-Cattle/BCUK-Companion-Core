@@ -15,19 +15,29 @@ public sealed class CompanionTrayAppOptions
     public string DataFolderName { get; init; } = "BCUKCompanion";
 
     /// <summary>
-    /// Invoked on the UI thread whenever the bot host reports an event (e.g. a channel-point
-    /// redemption), so a companion app can react to it without owning any bot-connection
-    /// logic itself.
+    /// Builds the dispatcher that runs a bot event's mapped actions. When set, the shell itself
+    /// handles every redemption and advanced command the same way: it runs the matched actions,
+    /// shows a balloon for any that fail, and acknowledges advanced commands from the result. The
+    /// companion app only contributes its own action kinds (see <see cref="EventActionTypeRegistry"/>)
+    /// and whatever context they need. Called once per event, on a background thread, so it can
+    /// load the latest saved mappings and devices each time.
+    /// </summary>
+    public Func<EventActionDispatcher>? CreateEventActionDispatcher { get; init; }
+
+    /// <summary>
+    /// Invoked on the UI thread for every bot event (redemption, activity or advanced command),
+    /// so a companion app can react to it without owning any bot-connection logic itself.
     /// </summary>
     public Action<BotEventArgs>? OnBotEvent { get; init; }
 
     /// <summary>
-    /// Invoked on the UI thread for each bot event, after <see cref="OnBotEvent"/>, and awaited:
-    /// return the result of running the event's mapped actions (typically
-    /// <see cref="EventActionDispatcher.DispatchAsync(BotEventArgs, CancellationToken)"/>). For an
-    /// advanced command (<c>command.triggered</c>) that needs an acknowledgement, the shell reports
-    /// the result back to the bot — anything but every mapped action succeeding refunds the
-    /// viewer, and so does leaving this unset, since then nothing ran the command.
+    /// Invoked on the UI thread for every bot event (redemption, activity or advanced command),
+    /// after <see cref="OnBotEvent"/>, and awaited. Most apps should set
+    /// <see cref="CreateEventActionDispatcher"/> instead and leave this unset. Without a
+    /// dispatcher, the shell acknowledges an advanced command (<c>command.triggered</c>) from
+    /// the result returned here: anything but every mapped action succeeding refunds the viewer,
+    /// and so does leaving both unset, since then nothing ran the command. With a dispatcher, the
+    /// acknowledgement comes from the dispatcher's result instead.
     /// </summary>
     public Func<BotEventArgs, Task<EventDispatchResult?>>? OnBotEventAsync { get; init; }
 

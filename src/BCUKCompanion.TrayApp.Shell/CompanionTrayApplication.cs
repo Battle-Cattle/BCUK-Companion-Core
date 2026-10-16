@@ -183,29 +183,22 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption)
     {
-        Dispatcher.Invoke(() =>
+        _ = Dispatcher.InvokeAsync(async () =>
         {
             string who = string.IsNullOrEmpty(redemption.UserName) ? redemption.UserLogin : redemption.UserName;
             _trayIcon.ShowBalloon(redemption.RewardTitle, $"Redeemed by {who}");
 
-            try
-            {
-                _options.OnBotEvent?.Invoke(new BotEventArgs(
-                    "redemption.received",
-                    new Dictionary<string, string?>
-                    {
-                        ["rewardId"] = redemption.RewardId,
-                        ["rewardTitle"] = redemption.RewardTitle,
-                        ["userLogin"] = redemption.UserLogin,
-                        ["userName"] = redemption.UserName,
-                        ["userInput"] = redemption.UserInput,
-                        ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
-                    }));
-            }
-            catch (Exception)
-            {
-                // Host-supplied callback — don't let it take down the shared tray process.
-            }
+            await HandleBotEventAsync(new BotEventArgs(
+                EventActionDispatcher.RedemptionEventName,
+                new Dictionary<string, string?>
+                {
+                    ["rewardId"] = redemption.RewardId,
+                    ["rewardTitle"] = redemption.RewardTitle,
+                    ["userLogin"] = redemption.UserLogin,
+                    ["userName"] = redemption.UserName,
+                    ["userInput"] = redemption.UserInput,
+                    ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
+                })).ConfigureAwait(true);
         });
     }
 
@@ -220,7 +213,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
     private void OnActivityReceived(object? sender, CompanionActivityEvent activity)
     {
-        Dispatcher.Invoke(() =>
+        _ = Dispatcher.InvokeAsync(async () =>
         {
             string title = ActivityTitles.TryGetValue(activity.Type, out string? knownTitle) ? knownTitle : activity.Type;
             string text = string.IsNullOrEmpty(activity.Detail)
@@ -228,28 +221,22 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                 : $"{activity.DisplayName} — {activity.Detail}";
             _trayIcon.ShowBalloon(title, text);
 
-            try
-            {
-                _options.OnBotEvent?.Invoke(new BotEventArgs(
-                    "activity.received",
-                    new Dictionary<string, string?>
-                    {
-                        ["type"] = activity.Type,
-                        ["displayName"] = activity.DisplayName,
-                        ["detail"] = activity.Detail,
-                        ["occurredAt"] = activity.OccurredAt.ToString("o"),
-                    }));
-            }
-            catch (Exception)
-            {
-                // Host-supplied callback — don't let it take down the shared tray process.
-            }
+            await HandleBotEventAsync(new BotEventArgs(
+                "activity.received",
+                new Dictionary<string, string?>
+                {
+                    ["type"] = activity.Type,
+                    ["displayName"] = activity.DisplayName,
+                    ["detail"] = activity.Detail,
+                    ["occurredAt"] = activity.OccurredAt.ToString("o"),
+                })).ConfigureAwait(true);
         });
     }
 
     /// <summary>
-    /// Shows a balloon for an advanced command, runs its mapped actions (and the host's callbacks), then acknowledges
-    /// it to the bot when it asks for an acknowledgement — a failure there refunds the viewer.
+    /// Shows a balloon for an advanced command, runs it through <see cref="HandleBotEventAsync"/>
+    /// like any other event, then acknowledges it to the bot when it asks for an acknowledgement —
+    /// a failure there refunds the viewer.
     /// </summary>
     private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command)
     {
@@ -263,17 +250,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                 : $"Used by {(string.IsNullOrEmpty(command.UserName) ? command.UserLogin : command.UserName)}";
             _trayIcon.ShowBalloon(command.CommandName, text);
 
-            BotEventArgs botEvent = BuildCommandEventArgs(command);
-            try
-            {
-                _options.OnBotEvent?.Invoke(botEvent);
-            }
-            catch (Exception)
-            {
-                // Host-supplied callback — don't let it take down the shared tray process.
-            }
-
-            (bool ok, string? error) = await RunCommandActionsAsync(botEvent).ConfigureAwait(true);
+            (bool ok, string? error) = await HandleBotEventAsync(BuildCommandEventArgs(command)).ConfigureAwait(true);
             if (!command.AckRequired)
             {
                 return;
@@ -292,24 +269,72 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     }
 
     /// <summary>
-    /// Awaits the host's <see cref="CompanionTrayAppOptions.OnBotEventAsync"/> for a command and
-    /// turns its result into the acknowledgement to send.
+    /// Runs every bot event — redemption, activity or advanced command — through the same steps:
+    /// the host's <see cref="CompanionTrayAppOptions.OnBotEvent"/>, then its awaited
+    /// <see cref="CompanionTrayAppOptions.OnBotEventAsync"/>, then (when the host set
+    /// <see cref="CompanionTrayAppOptions.CreateEventActionDispatcher"/>) the event's mapped
+    /// actions, with a balloon for any that fail. Returns the acknowledgement an advanced command
+    /// should send; the other event kinds ignore it.
     /// </summary>
-    private async Task<(bool Ok, string? Error)> RunCommandActionsAsync(BotEventArgs botEvent)
+    private async Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent)
     {
-        if (_options.OnBotEventAsync is not { } handler)
+        try
         {
-            return AdvancedCommandAck.FromDispatchResult(null);
+            _options.OnBotEvent?.Invoke(botEvent);
+        }
+        catch (Exception)
+        {
+            // Host-supplied callback — don't let it take down the shared tray process.
+        }
+
+        EventDispatchResult? hostResult = null;
+        string? hostError = null;
+        if (_options.OnBotEventAsync is { } handler)
+        {
+            try
+            {
+                hostResult = await handler(botEvent).ConfigureAwait(true);
+            }
+            catch (Exception ex)
+            {
+                hostError = ex.Message;
+            }
+        }
+
+        if (_options.CreateEventActionDispatcher is not { } createDispatcher)
+        {
+            return hostError is null ? AdvancedCommandAck.FromDispatchResult(hostResult) : (false, hostError);
         }
 
         try
         {
-            return AdvancedCommandAck.FromDispatchResult(await handler(botEvent).ConfigureAwait(true));
+            // Off the UI thread: building the dispatcher typically loads the saved config, and
+            // the actions themselves do network/BLE I/O (and Delay actions wait).
+            EventDispatchResult? result = await Task.Run(() => createDispatcher().DispatchAsync(botEvent)).ConfigureAwait(true);
+            var ack = AdvancedCommandAck.FromDispatchResult(result);
+            ReportFailedActions(result);
+            return ack;
         }
         catch (Exception ex)
         {
+            _trayIcon.ShowBalloon("Action dispatch crashed", ex.Message);
             return (false, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Surfaces actions that ran but failed (a wrong device IP, an offline device, ...) as a
+    /// balloon, since Debug output is compiled out of a Release build.
+    /// </summary>
+    private void ReportFailedActions(EventDispatchResult? result)
+    {
+        if (result is null || result.ActionResults.Count == 0 || result.AllSucceeded)
+        {
+            return;
+        }
+
+        string detail = string.Join("; ", result.ActionResults.Where(r => !r.Success).Select(r => r.ErrorMessage ?? "Action failed."));
+        _trayIcon.ShowBalloon("Action failed", detail);
     }
 
     /// <summary>
