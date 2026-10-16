@@ -311,8 +311,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             // Off the UI thread: building the dispatcher typically loads the saved config, and
             // the actions themselves do network/BLE I/O (and Delay actions wait).
             EventDispatchResult? result = await Task.Run(() => createDispatcher().DispatchAsync(botEvent)).ConfigureAwait(true);
+            var ack = AdvancedCommandAck.FromDispatchResult(result);
             ReportFailedActions(result);
-            return AdvancedCommandAck.FromDispatchResult(result);
+            return ack;
         }
         catch (Exception ex)
         {
