@@ -18,7 +18,9 @@ referenced in the guide).
 ## Solution layout
 
 - `src/BCUKCompanion.Core` — platform-agnostic class library: OAuth
-  loopback flow, token storage abstraction, SSE event stream client.
+  loopback flow, token storage abstraction, SSE event stream client,
+  event-action dispatch/config persistence, and GitHub Releases update
+  checking (`Updates/`).
   Builds and tests fine on Linux/macOS/Windows. Packed and published as
   `BCUKCompanion.Core`.
 - `src/BCUKCompanion.TrayApp.Shell` — WPF + WinForms-NotifyIcon tray-app
@@ -79,6 +81,14 @@ found`. This is expected — build/test those projects on a real Windows
 machine or a `windows-latest` GitHub Actions runner (see
 `.github/workflows/dotnet.yml`). Do not spend time trying to work around
 this on Linux.
+
+## Shared release workflow
+
+`.github/workflows/companion-release.yml` is a reusable (`workflow_call`)
+workflow per-user apps call to publish their Windows build to a GitHub
+Release. Its output (tag, `<app>-<tag>-win-x64.zip`, `<zip>.sha256`) is the
+contract `GitHubReleaseUpdateChecker` and the Shell's updater rely on —
+change both together.
 
 ## Publishing packages
 

@@ -28,7 +28,6 @@ public static class AdvancedCommandAck
             return (true, null);
         }
 
-        var errors = result.ActionResults.Where(r => !r.Success).Select(r => r.ErrorMessage ?? "Action failed.");
-        return (false, string.Join("; ", errors));
+        return (false, result.FailureSummary);
     }
 }

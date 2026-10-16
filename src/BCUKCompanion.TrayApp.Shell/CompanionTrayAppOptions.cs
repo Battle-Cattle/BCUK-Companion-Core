@@ -1,6 +1,7 @@
 using BCUKCompanion.Core;
 using BCUKCompanion.Core.Actions;
 using BCUKCompanion.Core.Models;
+using BCUKCompanion.TrayApp.Updates;
 
 namespace BCUKCompanion.TrayApp;
 
@@ -13,6 +14,20 @@ namespace BCUKCompanion.TrayApp;
 public sealed class CompanionTrayAppOptions
 {
     public string DataFolderName { get; init; } = "BCUKCompanion";
+
+    /// <summary>
+    /// The app's name as shown to the user: the tray icon's tooltip, window titles, the
+    /// "already running" message and the shell's own balloons. Set it to tell apart several
+    /// companion apps running on the same Windows account.
+    /// </summary>
+    public string DisplayName { get; init; } = "BCUK Companion";
+
+    /// <summary>
+    /// Turns on self-updating from the app's GitHub Releases: a silent check-and-install at launch
+    /// (for release builds only) and a "Check for updates..." tray menu item. Null (the default)
+    /// leaves updating off.
+    /// </summary>
+    public CompanionUpdateOptions? Updates { get; init; }
 
     /// <summary>
     /// Builds the dispatcher that runs a bot event's mapped actions. When set, the shell itself

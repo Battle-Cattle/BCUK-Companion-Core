@@ -5,6 +5,7 @@ using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
 using BCUKCompanion.Core.Tokens;
 using BCUKCompanion.TrayApp.Services;
+using BCUKCompanion.TrayApp.Updates;
 using BCUKCompanion.TrayApp.Views;
 
 namespace BCUKCompanion.TrayApp;
@@ -50,7 +51,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             // Another instance owns the mutex — don't try to release a lock we never acquired.
             _singleInstanceMutex.Dispose();
             _singleInstanceMutex = null;
-            System.Windows.MessageBox.Show("BCUK Companion is already running — check your system tray.", "BCUK Companion");
+            System.Windows.MessageBox.Show($"{_options.DisplayName} is already running — check your system tray.", _options.DisplayName);
             Shutdown();
             return;
         }
@@ -59,13 +60,25 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _botHost = new Uri(_settings.BotHost);
         _companionClient = CreateCompanionClient(_botHost);
 
-        _trayIcon = new TrayIconController(_options.AdditionalMenuItems);
+        // The updater's balloons go through _trayIcon, which exists by the time it shows any.
+        Action<string, string> showBalloon = (title, text) => Dispatcher.Invoke(() => _trayIcon.ShowBalloon(title, text));
+        CompanionUpdater? updater = _options.Updates is { } updateOptions
+            ? new CompanionUpdater(updateOptions, _options.DisplayName, _options.DataFolderName, showBalloon)
+            : null;
+
+        var menuItems = new List<TrayMenuItem>(_options.AdditionalMenuItems ?? []);
+        if (updater is not null)
+        {
+            menuItems.Add(updater.CreateMenuItem());
+        }
+
+        _trayIcon = new TrayIconController(_options.DisplayName, menuItems);
         try
         {
             // Host-supplied callback: isolate it (same as OnClientReady/OnBotEvent) so a
             // faulty host doesn't take down startup, and marshal ShowBalloon onto the UI
             // thread since hosts commonly call it from background dispatch (e.g. OnBotEvent).
-            _options.OnTrayIconReady?.Invoke((title, text) => Dispatcher.Invoke(() => _trayIcon.ShowBalloon(title, text)));
+            _options.OnTrayIconReady?.Invoke(showBalloon);
         }
         catch (Exception)
         {
@@ -74,6 +87,11 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _trayIcon.OpenLoginRequested += (_, _) => ShowLoginWindow();
         _trayIcon.OpenSettingsRequested += (_, _) => ShowSettingsWindow();
         _trayIcon.ExitRequested += (_, _) => Shutdown();
+
+        if (_options.Updates?.CheckOnLaunch == true)
+        {
+            updater?.CheckOnLaunch();
+        }
 
         if (_companionClient.IsLoggedIn)
         {
@@ -93,7 +111,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             return;
         }
 
-        _loginWindow = new LoginWindow(_companionClient, _settings.BotHost);
+        _loginWindow = new LoginWindow(_companionClient, _settings.BotHost) { Title = $"{_options.DisplayName} — Login" };
         _loginWindow.LoginSucceeded += (_, _) => _companionClient.StartListening();
         _loginWindow.ServerHostChanged += OnLoginServerHostChanged;
         _loginWindow.Closed += (_, _) => _loginWindow = null;
@@ -109,7 +127,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             return;
         }
 
-        _settingsWindow = new SettingsWindow(_companionClient, _settings, _isConnected);
+        _settingsWindow = new SettingsWindow(_companionClient, _settings, _isConnected) { Title = $"{_options.DisplayName} — Settings" };
         _settingsWindow.LoggedOut += (_, _) => ShowLoginWindow();
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
@@ -328,13 +346,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// </summary>
     private void ReportFailedActions(EventDispatchResult? result)
     {
-        if (result is null || result.ActionResults.Count == 0 || result.AllSucceeded)
+        if (result?.FailureSummary is { } detail)
         {
-            return;
+            _trayIcon.ShowBalloon("Action failed", detail);
         }
-
-        string detail = string.Join("; ", result.ActionResults.Where(r => !r.Success).Select(r => r.ErrorMessage ?? "Action failed."));
-        _trayIcon.ShowBalloon("Action failed", detail);
     }
 
     /// <summary>
@@ -368,7 +383,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         Dispatcher.Invoke(() =>
         {
             _isConnected = state == CompanionConnectionState.Connected;
-            _trayIcon.SetStatus($"BCUK Companion — {state}");
+            _trayIcon.SetStatus($"{_options.DisplayName} — {state}");
 
             if (state == CompanionConnectionState.AuthenticationFailed)
             {
@@ -388,7 +403,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     {
         Dispatcher.Invoke(() =>
         {
-            _trayIcon.ShowBalloon("BCUK Companion", "Lost connection to the event stream — reconnecting…");
+            _trayIcon.ShowBalloon(_options.DisplayName, "Lost connection to the event stream — reconnecting…");
 
             if (_companionClient.IsLoggedIn)
             {

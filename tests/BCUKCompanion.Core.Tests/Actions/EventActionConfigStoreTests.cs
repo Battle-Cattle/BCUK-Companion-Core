@@ -86,3 +86,63 @@ public sealed class EventActionConfigStoreTests : IDisposable
         Assert.Equal(EventActionTriggerKind.Reward, mapping.TriggerKind);
     }
 }
+
+internal sealed class HookedTestConfigStore(string dataFolderName, EventActionTypeRegistry registry)
+    : EventActionConfigStore<TestConfig>(dataFolderName, "test-config.json", registry)
+{
+    public int CreateWhenMissingCalls { get; private set; }
+
+    protected override TestConfig CreateWhenMissing()
+    {
+        CreateWhenMissingCalls++;
+        var migrated = new TestConfig { Mappings = [new EventActionMapping("Migrated", [])] };
+        Save(migrated);
+        return migrated;
+    }
+
+    protected override TestConfig OnLoaded(TestConfig config) =>
+        config with { Mappings = config.Mappings.Where(m => m.RewardTitle != "Invalid").ToList() };
+}
+
+public sealed class EventActionConfigStoreHookTests : IDisposable
+{
+    private readonly HookedTestConfigStore store =
+        new($"BCUKCompanion.Core.Tests.{Guid.NewGuid():N}", new EventActionTypeRegistry());
+
+    public void Dispose()
+    {
+        var directory = Path.GetDirectoryName(store.ConfigFilePath)!;
+        if (Directory.Exists(directory))
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Load_MissingFile_UsesCreateWhenMissingOnce()
+    {
+        Assert.Equal("Migrated", Assert.Single(store.Load().Mappings).RewardTitle);
+        Assert.Equal("Migrated", Assert.Single(store.Load().Mappings).RewardTitle);
+
+        Assert.Equal(1, store.CreateWhenMissingCalls);
+    }
+
+    [Fact]
+    public void Load_ExistingFile_PassesThroughOnLoaded()
+    {
+        store.Save(new TestConfig { Mappings = [new EventActionMapping("Invalid", []), new EventActionMapping("Valid", [])] });
+
+        Assert.Equal("Valid", Assert.Single(store.Load().Mappings).RewardTitle);
+        Assert.Equal(0, store.CreateWhenMissingCalls);
+    }
+
+    [Fact]
+    public void Load_CorruptFile_PassesThroughOnLoadedWithoutMigrating()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(store.ConfigFilePath)!);
+        File.WriteAllText(store.ConfigFilePath, "{ not valid json");
+
+        Assert.Empty(store.Load().Mappings);
+        Assert.Equal(0, store.CreateWhenMissingCalls);
+    }
+}
