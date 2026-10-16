@@ -68,9 +68,11 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     // Waits for the app to exit (releasing its file locks and single-instance mutex), backs up the
     // install folder, then copies the new build over it, retrying in case antivirus briefly holds
     // a file. If anything fails part-way, the backup is copied back so the previous version still
-    // starts, and the work folder (with the backup) is kept for manual recovery. If the app never
-    // exits, nothing is touched. Files the new build no longer ships are left in place rather than
-    // mirroring, so nothing a user dropped into the folder gets deleted.
+    // starts, and the work folder (with the backup and an update-failed.log) is kept for manual
+    // recovery. If the restore fails too, the folder may hold a mix of both builds, so the app is
+    // not relaunched; restore-failed.log records why. If the app never exits, nothing is touched.
+    // Files the new build no longer ships are left in place rather than mirroring, so nothing a
+    // user dropped into the folder gets deleted.
     private const string ApplyUpdateScript = """
         param(
             [int]$ProcessId,
@@ -93,6 +95,11 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             }
         }
 
+        # Best-effort: a log that can't be written must not stop the restore that follows it.
+        function Write-Log([string]$Name, $Record) {
+            try { $Record | Out-File -FilePath (Join-Path $WorkDir $Name) -Force } catch { }
+        }
+
         try { Wait-Process -Id $ProcessId -Timeout 60 } catch { }
         if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
             exit 1
@@ -100,13 +107,24 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
 
         $backup = Join-Path $WorkDir 'backup'
         $updated = $false
+        $restored = $false
         try {
             New-Item -ItemType Directory -Path $backup -Force | Out-Null
             Copy-Tree $Target $backup
             Copy-Tree $Source $Target
             $updated = $true
         } catch {
-            try { Copy-Tree $backup $Target } catch { }
+            Write-Log 'update-failed.log' $_
+            try {
+                Copy-Tree $backup $Target
+                $restored = $true
+            } catch {
+                Write-Log 'restore-failed.log' $_
+            }
+        }
+
+        if (-not $updated -and -not $restored) {
+            exit 1
         }
 
         Start-Process -FilePath $Exe -WorkingDirectory $Target

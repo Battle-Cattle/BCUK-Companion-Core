@@ -107,17 +107,30 @@ public sealed class GitHubReleaseUpdateChecker
 
     /// <summary>
     /// Downloads <paramref name="update"/>'s zip to <paramref name="destinationPath"/> and, when
-    /// the release publishes a checksum, verifies it — deleting the file and throwing
-    /// <see cref="InvalidDataException"/> on a mismatch, so a truncated or corrupted download is
-    /// never installed.
+    /// the release publishes a checksum, verifies it — throwing <see cref="InvalidDataException"/>
+    /// on a mismatch, so a truncated or corrupted download is never installed. On any failure the
+    /// partially written or mismatched file is deleted.
     /// </summary>
     public async Task DownloadAsync(AvailableUpdate update, string destinationPath, CancellationToken cancellationToken = default)
     {
         using (var response = await http.GetAsync(update.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false))
         {
             response.EnsureSuccessStatusCode();
-            await using var file = File.Create(destinationPath);
-            await response.Content.CopyToAsync(file, cancellationToken).ConfigureAwait(false);
+            var file = File.Create(destinationPath);
+            try
+            {
+                await using (file.ConfigureAwait(false))
+                {
+                    await response.Content.CopyToAsync(file, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Only reached once File.Create succeeded, so this deletes the partial file this
+                // call wrote, never a pre-existing one it failed to open.
+                TryDelete(destinationPath);
+                throw;
+            }
         }
 
         if (update.ChecksumUrl is null)
@@ -132,8 +145,20 @@ public sealed class GitHubReleaseUpdateChecker
         }
         catch (InvalidDataException)
         {
-            File.Delete(destinationPath);
+            TryDelete(destinationPath);
             throw;
+        }
+    }
+
+    // Best-effort: a failure to clean up must not hide the download or checksum error that caused it.
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

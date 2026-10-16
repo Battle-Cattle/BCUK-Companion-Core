@@ -383,7 +383,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         Dispatcher.Invoke(() =>
         {
             _isConnected = state == CompanionConnectionState.Connected;
-            _trayIcon.SetStatus($"{_options.DisplayName} — {state}");
+            _trayIcon.SetStatus(_options.DisplayName, state.ToString());
 
             if (state == CompanionConnectionState.AuthenticationFailed)
             {
