@@ -247,6 +247,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         });
     }
 
+    /// <summary>
+    /// Shows a balloon for an advanced command, runs its mapped actions (and the host's callbacks), then acknowledges
+    /// it to the bot when it asks for an acknowledgement — a failure there refunds the viewer.
+    /// </summary>
     private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command)
     {
         // Captured now: a bot-host change can replace _companionClient while the actions run,

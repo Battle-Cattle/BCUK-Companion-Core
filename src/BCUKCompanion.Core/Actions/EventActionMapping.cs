@@ -27,6 +27,7 @@ public sealed record EventActionMapping(
     IReadOnlyList<IEventAction> Actions,
     EventActionTriggerKind TriggerKind = EventActionTriggerKind.Reward)
 {
+    /// <summary>The mapping's label in the mappings list, prefixed with "Command:" for a command mapping.</summary>
     public override string ToString() => TriggerKind == EventActionTriggerKind.Command
         ? $"Command: {RewardTitle} ({Actions.Count} action(s))"
         : $"{RewardTitle} ({Actions.Count} action(s))";

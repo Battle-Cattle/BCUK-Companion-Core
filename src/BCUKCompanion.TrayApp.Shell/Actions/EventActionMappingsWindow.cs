@@ -211,6 +211,10 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         return rewards.Where(r => r.IsEnabled).Select(r => r.Title);
     }
 
+    /// <summary>
+    /// Replaces the title suggestions with the server's rewards or commands (per <paramref name="kind"/>) plus the
+    /// already-mapped names, unless the fetch fails or a newer refresh (<paramref name="sequence"/>) has started.
+    /// </summary>
     private async Task RefreshRewardTitleSuggestionsFromServerAsync(CompanionClient client, EventActionTriggerKind kind, int sequence)
     {
         IEnumerable<string> names;

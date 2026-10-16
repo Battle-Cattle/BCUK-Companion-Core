@@ -342,6 +342,7 @@ public sealed class CompanionEventStream
         }
     }
 
+    /// <summary>Parses an <c>advanced_command</c> frame and raises <see cref="AdvancedCommandReceived"/> once per complete, unseen event.</summary>
     private void HandleAdvancedCommandEvent(string data)
     {
         AdvancedCommandEvent? command;
@@ -360,6 +361,7 @@ public sealed class CompanionEventStream
         }
     }
 
+    /// <summary>Whether an advanced command event has the fields a handler relies on (id, name, a known source, a timestamp).</summary>
     private static bool IsComplete(AdvancedCommandEvent command) =>
         !string.IsNullOrWhiteSpace(command.Id)
         && !string.IsNullOrWhiteSpace(command.CommandName)
