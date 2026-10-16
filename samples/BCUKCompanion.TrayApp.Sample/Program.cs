@@ -12,9 +12,9 @@ internal static class Program
         {
             DataFolderName = "BCUKCompanion.TrayApp.Sample",
             OnBotEvent = e => Console.WriteLine($"Bot event: {e.EventName} ({string.Join(", ", e.Metadata.Select(kv => $"{kv.Key}={kv.Value}"))})"),
-            // No actions are configured in the sample, so every advanced command is acknowledged
-            // as a failure (and the viewer refunded); a real app returns its dispatcher's result.
-            OnBotEventAsync = _ => Task.FromResult<BCUKCompanion.Core.Actions.EventDispatchResult?>(null),
+            // No actions are configured in the sample, so it sets no CreateEventActionDispatcher and
+            // every advanced command is acknowledged as a failure (the viewer is refunded). A real
+            // app sets CreateEventActionDispatcher to a dispatcher over its own action kinds.
             AdditionalMenuItems = new[]
             {
                 new TrayMenuItem("Sample Settings...", () => Console.WriteLine("Sample settings clicked"))
