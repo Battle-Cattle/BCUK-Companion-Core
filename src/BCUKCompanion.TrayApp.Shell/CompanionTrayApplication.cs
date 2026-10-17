@@ -179,6 +179,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// Creates the client for <paramref name="botHost"/>, wires its events to the tray, and
+    /// seeds its activity stream with the last activity id shown for that host.
+    /// </summary>
     private CompanionClient CreateCompanionClient(Uri botHost)
     {
         var client = new CompanionClient(botHost, new DpapiFileTokenStore(AppPaths.TokenFile));

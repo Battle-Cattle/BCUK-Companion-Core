@@ -48,7 +48,7 @@ public sealed class CompanionEventStream
     public event EventHandler<long>? LastActivityEventIdChanged;
 
     /// <summary>
-    /// The newest activity event id already delivered. <see cref="ActivityReceived"/> is only raised
+    /// The newest activity event id already delivered (gets or sets it). <see cref="ActivityReceived"/> is only raised
     /// for events with a higher id. The connect-time catch-up (GET /api/companion/events/recent)
     /// returns recent events whether or not this process has seen them, so a host that wants to
     /// avoid re-announcing them after a restart persists this value (via
@@ -260,9 +260,10 @@ public sealed class CompanionEventStream
             // Nothing is known about what was already shown, so treat everything the server
             // returned as seen rather than announcing it. Live events after this still go through.
             BaselineOnFirstCatchUp = false;
-            if (valid.Count > 0)
+            if (valid.Count > 0 && MarkSeen(valid[^1]))
             {
-                MarkSeen(valid[^1]);
+                // No activity to dispatch here, so the host only hears about the new mark.
+                LastActivityEventIdChanged?.Invoke(this, valid[^1].Id);
             }
             return;
         }
@@ -271,7 +272,7 @@ public sealed class CompanionEventStream
         {
             if (MarkSeen(activity))
             {
-                ActivityReceived?.Invoke(this, activity);
+                DispatchActivity(activity);
             }
         }
     }
@@ -305,6 +306,10 @@ public sealed class CompanionEventStream
         // Any other type is ignored for forward compatibility.
     }
 
+    /// <summary>
+    /// Parses a live activity frame and dispatches it if it's valid and newer than anything
+    /// already delivered.
+    /// </summary>
     private void HandleActivityEvent(string data)
     {
         CompanionActivityEvent? activity;
@@ -328,7 +333,7 @@ public sealed class CompanionEventStream
         // if MarkSeen says it's genuinely new.
         if (MarkSeen(activity!))
         {
-            ActivityReceived?.Invoke(this, activity!);
+            DispatchActivity(activity!);
         }
     }
 
@@ -362,8 +367,19 @@ public sealed class CompanionEventStream
         }
 
         _lastActivityEventId = activity.Id;
-        LastActivityEventIdChanged?.Invoke(this, activity.Id);
         return true;
+    }
+
+    /// <summary>
+    /// Raises <see cref="ActivityReceived"/> for a newly seen activity, then
+    /// <see cref="LastActivityEventIdChanged"/>. In that order, so a host that persists the id
+    /// from the second event has always been handed the activity first: if the process exits in
+    /// between, the next run shows the activity again rather than skipping one never shown.
+    /// </summary>
+    private void DispatchActivity(CompanionActivityEvent activity)
+    {
+        ActivityReceived?.Invoke(this, activity);
+        LastActivityEventIdChanged?.Invoke(this, activity.Id);
     }
 
     private void HandleRedemptionEvent(string data)

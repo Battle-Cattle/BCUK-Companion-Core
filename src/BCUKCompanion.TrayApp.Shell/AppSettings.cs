@@ -23,6 +23,10 @@ public sealed class AppSettings
     /// <summary>The <see cref="LastActivityEventIds"/> key for a bot host: its URL, lower-cased, without a trailing slash.</summary>
     public static string ActivityKey(Uri botHost) => botHost.GetLeftPart(UriPartial.Path).TrimEnd('/').ToLowerInvariant();
 
+    /// <summary>
+    /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
+    /// missing, unreadable or has an invalid bot host.
+    /// </summary>
     public static AppSettings Load()
     {
         try
@@ -33,6 +37,8 @@ public sealed class AppSettings
                 AppSettings? loaded = JsonSerializer.Deserialize<AppSettings>(json);
                 if (loaded is not null && IsValidBotHost(loaded.BotHost))
                 {
+                    // An explicit JSON null overrides the initializer; startup reads this map.
+                    loaded.LastActivityEventIds ??= new();
                     return loaded;
                 }
             }
