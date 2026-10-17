@@ -83,6 +83,7 @@ public class CompanionEventStreamTests
         Assert.NotNull(redemption);
     }
 
+    /// <summary>With no mark set, the connect-time catch-up delivers every recent activity in id order.</summary>
     [Fact]
     public async Task BackfillsRecentActivityOnConnect()
     {
@@ -110,6 +111,106 @@ public class CompanionEventStreamTests
         Assert.Equal("/api/companion/events/recent", handler.LastRecentRequestPath);
     }
 
+    /// <summary>
+    /// A host-seeded <see cref="CompanionEventStream.LastActivityEventId"/> (from a previous run)
+    /// suppresses catch-up events up to it, delivers newer ones, and reports the new mark.
+    /// </summary>
+    [Fact]
+    public async Task SeededLastActivityEventIdSkipsAlreadyShownBackfill()
+    {
+        const string recent = """
+            {"ok":true,"events":[
+              {"type":"follow","id":7,"displayName":"LastSession","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
+              {"type":"follow","id":8,"displayName":"WhileClosed","detail":null,"occurredAt":"2026-01-01T00:01:00Z"}
+            ]}
+            """;
+        var handler = new RoutingHttpMessageHandler(sseBody: string.Empty, recentEventsBody: recent);
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"))
+        {
+            LastActivityEventId = 7,
+        };
+
+        var received = new List<CompanionActivityEvent>();
+        var changes = new List<long>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+        stream.LastActivityEventIdChanged += (_, id) => changes.Add(id);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
+        await Task.Delay(50);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        CompanionActivityEvent activity = Assert.Single(received);
+        Assert.Equal("WhileClosed", activity.DisplayName);
+        Assert.Equal(new long[] { 8 }, changes);
+        Assert.Equal(8, stream.LastActivityEventId);
+    }
+
+    /// <summary>
+    /// With no saved mark, <see cref="CompanionEventStream.BaselineOnFirstCatchUp"/> makes the
+    /// first catch-up record the newest id silently; a later live event is still delivered.
+    /// </summary>
+    [Fact]
+    public async Task BaselineOnFirstCatchUpRecordsNewestIdWithoutAnnouncingThenDeliversLiveEvents()
+    {
+        const string recent = """
+            {"ok":true,"events":[
+              {"type":"follow","id":3,"displayName":"Old","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
+              {"type":"follow","id":5,"displayName":"LastFollower","detail":null,"occurredAt":"2026-01-01T00:01:00Z"}
+            ]}
+            """;
+        const string sse = "data: {\"type\":\"follow\",\"id\":6,\"displayName\":\"NewFollower\",\"detail\":null,\"occurredAt\":\"2026-01-01T00:02:00Z\"}\n\n";
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: recent);
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"))
+        {
+            BaselineOnFirstCatchUp = true,
+        };
+
+        var received = new List<CompanionActivityEvent>();
+        var changes = new List<long>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+        stream.LastActivityEventIdChanged += (_, id) => changes.Add(id);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
+        await Task.Delay(50);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        CompanionActivityEvent activity = Assert.Single(received);
+        Assert.Equal("NewFollower", activity.DisplayName);
+        Assert.Equal(new long[] { 5, 6 }, changes);
+        Assert.False(stream.BaselineOnFirstCatchUp);
+    }
+
+    /// <summary>
+    /// The new mark is reported only after the activity itself, so a host persisting it never
+    /// records an activity it wasn't handed.
+    /// </summary>
+    [Fact]
+    public async Task LastActivityEventIdChangedIsRaisedAfterActivityReceived()
+    {
+        const string recent = """{"ok":true,"events":[{"type":"follow","id":4,"displayName":"Alice","detail":null,"occurredAt":"2026-01-01T00:00:00Z"}]}""";
+        var handler = new RoutingHttpMessageHandler(sseBody: string.Empty, recentEventsBody: recent);
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var order = new List<string>();
+        stream.ActivityReceived += (_, _) => order.Add("activity");
+        stream.LastActivityEventIdChanged += (_, _) => order.Add("mark");
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => order.Count >= 2, TestTimeout);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        Assert.Equal(new[] { "activity", "mark" }, order);
+    }
+
+    /// <summary>An activity returned by the catch-up and also sent live is delivered only once.</summary>
     [Fact]
     public async Task ActivityPresentInBothInitialBackfillAndInitialSseBodyIsDispatchedOnce()
     {
@@ -134,6 +235,7 @@ public class CompanionEventStreamTests
         Assert.Equal("Alice", activity.DisplayName);
     }
 
+    /// <summary>A catch-up response the server marked <c>ok: false</c> delivers nothing.</summary>
     [Fact]
     public async Task BackfillIgnoresOkFalseResponse()
     {

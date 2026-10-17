@@ -13,6 +13,26 @@ public sealed class AppSettings
 
     public bool StartWithWindows { get; set; }
 
+    /// <summary>
+    /// The newest activity event id already shown, per bot host (see <see cref="ActivityKey"/>).
+    /// Seeds the event stream on startup so the connect-time catch-up doesn't re-announce
+    /// activity (e.g. the last follower) that a previous run already showed.
+    /// </summary>
+    public Dictionary<string, long> LastActivityEventIds { get; set; } = new();
+
+    /// <summary>
+    /// The <see cref="LastActivityEventIds"/> key for a bot host: its scheme, host and port,
+    /// lower-cased. The event endpoints are root-relative, so any path in the configured URL
+    /// doesn't change which event stream is read and must not split its saved id. Any user info
+    /// in the URL is left out so credentials never end up in settings.json.
+    /// </summary>
+    public static string ActivityKey(Uri botHost) =>
+        botHost.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped).ToLowerInvariant();
+
+    /// <summary>
+    /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
+    /// missing, unreadable or has an invalid bot host.
+    /// </summary>
     public static AppSettings Load()
     {
         try
@@ -23,6 +43,8 @@ public sealed class AppSettings
                 AppSettings? loaded = JsonSerializer.Deserialize<AppSettings>(json);
                 if (loaded is not null && IsValidBotHost(loaded.BotHost))
                 {
+                    // An explicit JSON null overrides the initializer; startup reads this map.
+                    loaded.LastActivityEventIds ??= new();
                     return loaded;
                 }
             }
@@ -35,6 +57,7 @@ public sealed class AppSettings
         return LoadDefaultsFromBundledConfig();
     }
 
+    /// <summary>Whether <paramref name="botHost"/> is an absolute https URL, as the companion API requires.</summary>
     private static bool IsValidBotHost(string botHost) =>
         Uri.TryCreate(botHost, UriKind.Absolute, out Uri? uri)
         && uri.Scheme == Uri.UriSchemeHttps;
@@ -64,6 +87,7 @@ public sealed class AppSettings
         return settings;
     }
 
+    /// <summary>Writes these settings to settings.json atomically (temp file, then swap).</summary>
     public void Save()
     {
         if (!IsValidBotHost(BotHost))

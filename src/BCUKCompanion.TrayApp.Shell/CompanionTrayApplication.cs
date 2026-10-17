@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using BCUKCompanion.Core;
 using BCUKCompanion.Core.Actions;
@@ -86,7 +87,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
         _trayIcon.OpenLoginRequested += (_, _) => ShowLoginWindow();
         _trayIcon.OpenSettingsRequested += (_, _) => ShowSettingsWindow();
-        _trayIcon.ExitRequested += (_, _) => Shutdown();
+        // Shut down once the dispatcher is idle, so queued work (e.g. a SaveLastActivityEventId
+        // posted by the event stream) runs first rather than being aborted with the dispatcher.
+        _trayIcon.ExitRequested += (_, _) =>
+            Dispatcher.InvokeAsync(Shutdown, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 
         if (_options.Updates?.CheckOnLaunch == true)
         {
@@ -178,6 +182,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// Creates the client for <paramref name="botHost"/>, wires its events to the tray, and
+    /// seeds its activity stream with the last activity id shown for that host.
+    /// </summary>
     private CompanionClient CreateCompanionClient(Uri botHost)
     {
         var client = new CompanionClient(botHost, new DpapiFileTokenStore(AppPaths.TokenFile));
@@ -186,6 +194,21 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         client.Events.AdvancedCommandReceived += OnAdvancedCommandReceived;
         client.Events.ConnectionStateChanged += OnConnectionStateChanged;
         client.ListenLoopFaulted += OnListenLoopFaulted;
+
+        // The connect-time catch-up returns recent activity whether or not a previous run already
+        // showed it, so seed the stream with the last id this app showed for this bot host. With
+        // nothing saved yet (first run, or a new host), only record where the server is up to.
+        string activityKey = AppSettings.ActivityKey(botHost);
+        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long lastActivityEventId) && lastActivityEventId > 0)
+        {
+            client.Events.LastActivityEventId = lastActivityEventId;
+        }
+        else
+        {
+            client.Events.BaselineOnFirstCatchUp = true;
+        }
+        client.Events.LastActivityEventIdChanged += (_, id) =>
+            _ = Dispatcher.InvokeAsync(() => SaveLastActivityEventId(activityKey, id));
 
         try
         {
@@ -199,6 +222,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         return client;
     }
 
+    /// <summary>Shows a balloon for a redemption and hands it to the host's handlers and mapped actions.</summary>
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption)
     {
         _ = Dispatcher.InvokeAsync(async () =>
@@ -229,6 +253,33 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         ["raid"] = "Raid",
     };
 
+    /// <summary>
+    /// Persists the newest activity id shown for a bot host. Runs on the UI thread, like every
+    /// other settings save. Best-effort: failing to save only means one repeated notification
+    /// on the next launch.
+    /// </summary>
+    private void SaveLastActivityEventId(string activityKey, long id)
+    {
+        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long saved) && saved >= id)
+        {
+            return;
+        }
+
+        _settings.LastActivityEventIds[activityKey] = id;
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Shows a balloon for a follow/sub/raid/... and hands it to the host's handlers. Queued on the
+    /// UI thread ahead of the matching <see cref="SaveLastActivityEventId"/>, so the id is only
+    /// saved once the activity has been handled.
+    /// </summary>
     private void OnActivityReceived(object? sender, CompanionActivityEvent activity)
     {
         _ = Dispatcher.InvokeAsync(async () =>
