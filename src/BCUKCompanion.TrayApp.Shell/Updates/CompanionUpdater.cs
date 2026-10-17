@@ -126,7 +126,10 @@ internal sealed class CompanionUpdater
             return;
         }
 
-        Application.Current.Shutdown();
+        // Once idle, so queued work like the activity-id save runs first; the update script
+        // waits for this process to exit.
+        _ = Application.Current.Dispatcher.InvokeAsync(
+            () => Application.Current.Shutdown(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
     private void ReportInstallFailure(AvailableUpdate update, Exception ex, bool interactive)

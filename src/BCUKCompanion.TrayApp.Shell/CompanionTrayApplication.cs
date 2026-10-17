@@ -87,7 +87,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
         _trayIcon.OpenLoginRequested += (_, _) => ShowLoginWindow();
         _trayIcon.OpenSettingsRequested += (_, _) => ShowSettingsWindow();
-        _trayIcon.ExitRequested += (_, _) => Shutdown();
+        // Shut down once the dispatcher is idle, so queued work (e.g. a SaveLastActivityEventId
+        // posted by the event stream) runs first rather than being aborted with the dispatcher.
+        _trayIcon.ExitRequested += (_, _) =>
+            Dispatcher.InvokeAsync(Shutdown, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 
         if (_options.Updates?.CheckOnLaunch == true)
         {
