@@ -48,8 +48,8 @@ this repo.
 
    ```xml
    <ItemGroup>
-     <PackageReference Include="BCUKCompanion.Core" Version="0.10.0" />
-     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.9.0" />
+     <PackageReference Include="BCUKCompanion.Core" Version="0.12.0" />
+     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.11.0" />
    </ItemGroup>
    ```
 
