@@ -44,13 +44,15 @@ on:
         description: "Classic PAT with read:packages, to restore BCUKCompanion.* from GitHub Packages"
         required: true
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   release:
     name: Publish (Windows x64)
     runs-on: windows-latest
+    # Only this job needs write access, to create the tag and release.
+    permissions:
+      contents: write
     env:
       PROJECT: ${{ inputs.project }}
       APP_NAME: ${{ inputs.app-name }}

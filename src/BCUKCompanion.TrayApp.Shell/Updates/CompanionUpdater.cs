@@ -147,6 +147,7 @@ internal sealed class CompanionUpdater
         if (MessageBox.Show($"Couldn't install v{update.Version}:\n{reason}\n\nOpen the download page?",
                 caption, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
         {
+            // GitHubReleaseUpdateChecker only ever returns an https release page URL.
             Process.Start(new ProcessStartInfo(update.ReleasePageUrl.AbsoluteUri) { UseShellExecute = true })?.Dispose();
         }
     }

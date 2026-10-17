@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -88,16 +89,21 @@ public sealed class GitHubReleaseUpdateChecker
         }
 
         var asset = release.Assets?.FirstOrDefault(a => a.Name?.EndsWith(assetSuffix, StringComparison.OrdinalIgnoreCase) == true);
-        if (asset?.Name is null || !Uri.TryCreate(asset.BrowserDownloadUrl, UriKind.Absolute, out var downloadUrl))
+        if (asset?.Name is null || !TryCreateHttpsUri(asset.BrowserDownloadUrl, out var downloadUrl))
         {
             return null;
         }
 
         var checksumAsset = release.Assets!.FirstOrDefault(a =>
             string.Equals(a.Name, asset.Name + ChecksumSuffix, StringComparison.OrdinalIgnoreCase));
-        Uri.TryCreate(checksumAsset?.BrowserDownloadUrl, UriKind.Absolute, out var checksumUrl);
+        Uri? checksumUrl = null;
+        if (checksumAsset is not null && !TryCreateHttpsUri(checksumAsset.BrowserDownloadUrl, out checksumUrl))
+        {
+            // A published checksum we can't safely fetch must not turn into an unverified install.
+            return null;
+        }
 
-        if (!Uri.TryCreate(release.HtmlUrl, UriKind.Absolute, out var releasePageUrl))
+        if (!TryCreateHttpsUri(release.HtmlUrl, out var releasePageUrl))
         {
             releasePageUrl = new Uri($"https://github.com/{repoOwner}/{repoName}/releases");
         }
@@ -148,6 +154,19 @@ public sealed class GitHubReleaseUpdateChecker
             TryDelete(destinationPath);
             throw;
         }
+    }
+
+    // Release URLs come from the API response and the page URL is later opened with the shell,
+    // so anything that isn't plain https (file:, a UNC path, another scheme) is rejected.
+    private static bool TryCreateHttpsUri(string? value, [NotNullWhen(true)] out Uri? uri)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out uri) && uri.Scheme == Uri.UriSchemeHttps)
+        {
+            return true;
+        }
+
+        uri = null;
+        return false;
     }
 
     // Best-effort: a failure to clean up must not hide the download or checksum error that caused it.

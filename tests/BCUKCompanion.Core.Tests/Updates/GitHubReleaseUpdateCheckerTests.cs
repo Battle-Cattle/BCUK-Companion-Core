@@ -81,6 +81,54 @@ public sealed class GitHubReleaseUpdateCheckerTests : IDisposable
         Assert.Null(await CreateChecker(handler).CheckForUpdateAsync());
     }
 
+    [Theory]
+    [InlineData("http://example.test/App-v1.1.0-win-x64.zip")]
+    [InlineData("file:///C:/Windows/System32/calc.exe")]
+    public async Task CheckForUpdateAsync_NonHttpsDownloadUrl_ReturnsNull(string downloadUrl)
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, $$"""
+            {"tag_name":"v1.1.0","assets":[{"name":"App-v1.1.0-win-x64.zip","browser_download_url":"{{downloadUrl}}"}]}
+            """);
+
+        Assert.Null(await CreateChecker(handler).CheckForUpdateAsync());
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_NonHttpsReleasePage_FallsBackToReleasesPage()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """
+            {
+              "tag_name": "v1.1.0",
+              "html_url": "file:///C:/Windows/System32/calc.exe",
+              "assets": [
+                {"name":"App-v1.1.0-win-x64.zip","browser_download_url":"https://example.test/App-v1.1.0-win-x64.zip"},
+                {"name":"App-v1.1.0-win-x64.zip.sha256","browser_download_url":"https://example.test/App-v1.1.0-win-x64.zip.sha256"}
+              ]
+            }
+            """);
+
+        var update = await CreateChecker(handler).CheckForUpdateAsync();
+
+        Assert.NotNull(update);
+        Assert.Equal(new Uri("https://github.com/Battle-Cattle/BCUK-Companion-Test/releases"), update.ReleasePageUrl);
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_NonHttpsChecksumUrl_ReturnsNull()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """
+            {
+              "tag_name": "v1.1.0",
+              "assets": [
+                {"name":"App-v1.1.0-win-x64.zip","browser_download_url":"https://example.test/App-v1.1.0-win-x64.zip"},
+                {"name":"App-v1.1.0-win-x64.zip.sha256","browser_download_url":"http://example.test/App-v1.1.0-win-x64.zip.sha256"}
+              ]
+            }
+            """);
+
+        Assert.Null(await CreateChecker(handler).CheckForUpdateAsync());
+    }
+
     [Fact]
     public async Task CheckForUpdateAsync_NoReleaseYet_ReturnsNull()
     {

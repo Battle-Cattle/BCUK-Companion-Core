@@ -26,11 +26,12 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
         EnsureWritable(installDir);
 
         // A fresh folder per attempt: a failed install keeps its work folder (with the backup of
-        // the previous build) for manual recovery, and a later attempt must not delete it.
+        // the previous build) for manual recovery, and a later attempt must not delete it. Named
+        // from the parsed version, not the raw tag, so release data never shapes the path.
         string workDir = Path.Combine(
             Path.GetTempPath(),
             $"{dataFolderName}.Update",
-            $"{update.TagName}-{DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)}");
+            $"v{update.Version.ToString(3)}-{DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture)}");
         string stagingDir = Path.Combine(workDir, "files");
         Directory.CreateDirectory(stagingDir);
 
