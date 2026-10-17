@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using BCUKCompanion.Core;
 using BCUKCompanion.Core.Actions;
@@ -187,6 +188,21 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         client.Events.ConnectionStateChanged += OnConnectionStateChanged;
         client.ListenLoopFaulted += OnListenLoopFaulted;
 
+        // The connect-time catch-up returns recent activity whether or not a previous run already
+        // showed it, so seed the stream with the last id this app showed for this bot host. With
+        // nothing saved yet (first run, or a new host), only record where the server is up to.
+        string activityKey = AppSettings.ActivityKey(botHost);
+        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long lastActivityEventId) && lastActivityEventId > 0)
+        {
+            client.Events.LastActivityEventId = lastActivityEventId;
+        }
+        else
+        {
+            client.Events.BaselineOnFirstCatchUp = true;
+        }
+        client.Events.LastActivityEventIdChanged += (_, id) =>
+            _ = Dispatcher.InvokeAsync(() => SaveLastActivityEventId(activityKey, id));
+
         try
         {
             _options.OnClientReady?.Invoke(client);
@@ -228,6 +244,28 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         ["giftsub"] = "Gift Sub",
         ["raid"] = "Raid",
     };
+
+    /// <summary>
+    /// Persists the newest activity id shown for a bot host. Runs on the UI thread, like every
+    /// other settings save. Best-effort: failing to save only means one repeated notification
+    /// on the next launch.
+    /// </summary>
+    private void SaveLastActivityEventId(string activityKey, long id)
+    {
+        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long saved) && saved >= id)
+        {
+            return;
+        }
+
+        _settings.LastActivityEventIds[activityKey] = id;
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+        }
+    }
 
     private void OnActivityReceived(object? sender, CompanionActivityEvent activity)
     {

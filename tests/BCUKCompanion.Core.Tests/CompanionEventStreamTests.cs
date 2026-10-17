@@ -111,6 +111,73 @@ public class CompanionEventStreamTests
     }
 
     [Fact]
+    public async Task SeededLastActivityEventIdSkipsAlreadyShownBackfill()
+    {
+        const string recent = """
+            {"ok":true,"events":[
+              {"type":"follow","id":7,"displayName":"LastSession","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
+              {"type":"follow","id":8,"displayName":"WhileClosed","detail":null,"occurredAt":"2026-01-01T00:01:00Z"}
+            ]}
+            """;
+        var handler = new RoutingHttpMessageHandler(sseBody: string.Empty, recentEventsBody: recent);
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"))
+        {
+            LastActivityEventId = 7,
+        };
+
+        var received = new List<CompanionActivityEvent>();
+        var changes = new List<long>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+        stream.LastActivityEventIdChanged += (_, id) => changes.Add(id);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
+        await Task.Delay(50);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        CompanionActivityEvent activity = Assert.Single(received);
+        Assert.Equal("WhileClosed", activity.DisplayName);
+        Assert.Equal(new long[] { 8 }, changes);
+        Assert.Equal(8, stream.LastActivityEventId);
+    }
+
+    [Fact]
+    public async Task BaselineOnFirstCatchUpRecordsNewestIdWithoutAnnouncingThenDeliversLiveEvents()
+    {
+        const string recent = """
+            {"ok":true,"events":[
+              {"type":"follow","id":3,"displayName":"Old","detail":null,"occurredAt":"2026-01-01T00:00:00Z"},
+              {"type":"follow","id":5,"displayName":"LastFollower","detail":null,"occurredAt":"2026-01-01T00:01:00Z"}
+            ]}
+            """;
+        const string sse = "data: {\"type\":\"follow\",\"id\":6,\"displayName\":\"NewFollower\",\"detail\":null,\"occurredAt\":\"2026-01-01T00:02:00Z\"}\n\n";
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: recent);
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"))
+        {
+            BaselineOnFirstCatchUp = true,
+        };
+
+        var received = new List<CompanionActivityEvent>();
+        var changes = new List<long>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+        stream.LastActivityEventIdChanged += (_, id) => changes.Add(id);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
+        await Task.Delay(50);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        CompanionActivityEvent activity = Assert.Single(received);
+        Assert.Equal("NewFollower", activity.DisplayName);
+        Assert.Equal(new long[] { 5, 6 }, changes);
+        Assert.False(stream.BaselineOnFirstCatchUp);
+    }
+
+    [Fact]
     public async Task ActivityPresentInBothInitialBackfillAndInitialSseBodyIsDispatchedOnce()
     {
         const string sameTimestamp = "2026-01-01T00:00:00Z";

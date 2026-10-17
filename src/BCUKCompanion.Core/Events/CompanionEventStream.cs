@@ -41,6 +41,33 @@ public sealed class CompanionEventStream
     public event EventHandler<AdvancedCommandEvent>? AdvancedCommandReceived;
     public event EventHandler<CompanionConnectionState>? ConnectionStateChanged;
 
+    /// <summary>
+    /// Raised with the new value whenever <see cref="LastActivityEventId"/> advances, so a host can
+    /// persist it and seed the next run with it (see <see cref="LastActivityEventId"/>).
+    /// </summary>
+    public event EventHandler<long>? LastActivityEventIdChanged;
+
+    /// <summary>
+    /// The newest activity event id already delivered. <see cref="ActivityReceived"/> is only raised
+    /// for events with a higher id. The connect-time catch-up (GET /api/companion/events/recent)
+    /// returns recent events whether or not this process has seen them, so a host that wants to
+    /// avoid re-announcing them after a restart persists this value (via
+    /// <see cref="LastActivityEventIdChanged"/>) and sets it again before listening.
+    /// </summary>
+    public long LastActivityEventId
+    {
+        get => _lastActivityEventId;
+        set => _lastActivityEventId = value;
+    }
+
+    /// <summary>
+    /// When true and <see cref="LastActivityEventId"/> is still 0, the first catch-up only records
+    /// the newest event's id instead of raising <see cref="ActivityReceived"/> for everything the
+    /// server returns. For a host with no saved <see cref="LastActivityEventId"/> (a first run), so
+    /// it doesn't announce old activity. Set before listening.
+    /// </summary>
+    public bool BaselineOnFirstCatchUp { get; set; }
+
     public CompanionEventStream(HttpClient httpClient, Uri botHost)
     {
         _httpClient = httpClient;
@@ -226,7 +253,21 @@ public sealed class CompanionEventStream
             return;
         }
 
-        foreach (CompanionActivityEvent activity in parsed.Events.Where(IsValidActivity).OrderBy(e => e.Id))
+        List<CompanionActivityEvent> valid = parsed.Events.Where(IsValidActivity).OrderBy(e => e.Id).ToList();
+
+        if (BaselineOnFirstCatchUp && _lastActivityEventId == 0)
+        {
+            // Nothing is known about what was already shown, so treat everything the server
+            // returned as seen rather than announcing it. Live events after this still go through.
+            BaselineOnFirstCatchUp = false;
+            if (valid.Count > 0)
+            {
+                MarkSeen(valid[^1]);
+            }
+            return;
+        }
+
+        foreach (CompanionActivityEvent activity in valid)
         {
             if (MarkSeen(activity))
             {
@@ -321,6 +362,7 @@ public sealed class CompanionEventStream
         }
 
         _lastActivityEventId = activity.Id;
+        LastActivityEventIdChanged?.Invoke(this, activity.Id);
         return true;
     }
 

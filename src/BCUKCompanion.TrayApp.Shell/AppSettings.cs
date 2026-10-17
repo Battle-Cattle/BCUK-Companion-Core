@@ -13,6 +13,16 @@ public sealed class AppSettings
 
     public bool StartWithWindows { get; set; }
 
+    /// <summary>
+    /// The newest activity event id already shown, per bot host (see <see cref="ActivityKey"/>).
+    /// Seeds the event stream on startup so the connect-time catch-up doesn't re-announce
+    /// activity (e.g. the last follower) that a previous run already showed.
+    /// </summary>
+    public Dictionary<string, long> LastActivityEventIds { get; set; } = new();
+
+    /// <summary>The <see cref="LastActivityEventIds"/> key for a bot host: its URL, lower-cased, without a trailing slash.</summary>
+    public static string ActivityKey(Uri botHost) => botHost.GetLeftPart(UriPartial.Path).TrimEnd('/').ToLowerInvariant();
+
     public static AppSettings Load()
     {
         try
