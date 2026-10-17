@@ -23,9 +23,11 @@ public sealed class AppSettings
     /// <summary>
     /// The <see cref="LastActivityEventIds"/> key for a bot host: its scheme, host and port,
     /// lower-cased. The event endpoints are root-relative, so any path in the configured URL
-    /// doesn't change which event stream is read and must not split its saved id.
+    /// doesn't change which event stream is read and must not split its saved id. Any user info
+    /// in the URL is left out so credentials never end up in settings.json.
     /// </summary>
-    public static string ActivityKey(Uri botHost) => botHost.GetLeftPart(UriPartial.Authority).ToLowerInvariant();
+    public static string ActivityKey(Uri botHost) =>
+        botHost.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped).ToLowerInvariant();
 
     /// <summary>
     /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
