@@ -15,7 +15,7 @@ internal sealed class TrayIconController : IDisposable
     public event EventHandler? OpenSettingsRequested;
     public event EventHandler? ExitRequested;
 
-    public TrayIconController(IReadOnlyList<TrayMenuItem>? additionalMenuItems = null)
+    public TrayIconController(string displayName, IReadOnlyList<TrayMenuItem>? additionalMenuItems = null)
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Login / Account", null, (_, _) => OpenLoginRequested?.Invoke(this, EventArgs.Empty));
@@ -46,7 +46,7 @@ internal sealed class TrayIconController : IDisposable
         _notifyIcon = new NotifyIcon
         {
             Icon = System.Drawing.SystemIcons.Application,
-            Text = "BCUK Companion",
+            Text = displayName.Length <= 63 ? displayName : displayName[..63],
             ContextMenuStrip = menu,
             Visible = true,
         };
@@ -54,10 +54,17 @@ internal sealed class TrayIconController : IDisposable
         _notifyIcon.DoubleClick += (_, _) => OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    public void SetStatus(string tooltipText)
+    /// <summary>
+    /// Shows "&lt;displayName&gt; — &lt;status&gt;" as the tooltip. NotifyIcon.Text is limited to 63
+    /// characters, so a long display name is shortened rather than the status cut off.
+    /// </summary>
+    public void SetStatus(string displayName, string status)
     {
-        // NotifyIcon.Text is limited to 63 characters.
-        _notifyIcon.Text = tooltipText.Length <= 63 ? tooltipText : tooltipText[..63];
+        const int maxLength = 63;
+        string suffix = $" — {status}";
+        int maxNameLength = Math.Max(0, maxLength - suffix.Length);
+        string text = (displayName.Length <= maxNameLength ? displayName : displayName[..maxNameLength]) + suffix;
+        _notifyIcon.Text = text.Length <= maxLength ? text : text[..maxLength];
     }
 
     /// <summary>

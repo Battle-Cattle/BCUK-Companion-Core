@@ -48,8 +48,8 @@ this repo.
 
    ```xml
    <ItemGroup>
-     <PackageReference Include="BCUKCompanion.Core" Version="0.2.0" />
-     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.2.0" />
+     <PackageReference Include="BCUKCompanion.Core" Version="0.10.0" />
+     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.9.0" />
    </ItemGroup>
    ```
 
@@ -123,6 +123,41 @@ CompanionTrayApplication.Run(new CompanionTrayAppOptions
 - `AdditionalMenuItems` are appended to the shared tray icon's context
   menu (above "Exit"), so a companion app can surface its own settings
   window from the existing tray icon instead of a command-line flag.
+- `DisplayName` is the app's name in the tray tooltip, window titles and
+  the shell's own balloons and messages (default `"BCUK Companion"`).
+
+### Settings window and action editors
+
+Subclass `EventActionMappingsWindow<TConfig>` (in `BCUKCompanion.TrayApp.Actions`)
+for the "Event Mappings" tab, the Test button and saving. For the Add/Edit
+Action dialog, override `CreateActionEditors()` to return one
+`EventActionEditor` per integration (a category with its own parameter
+controls); the shell appends a built-in editor for Core's `DelayAction` and
+validates each built action against `BuildContext()`. `BuildFooter()` gives
+the standard status-text-plus-Save bar, and `RemoveActions(predicate)` strips
+actions from every mapping (e.g. those targeting a deleted device).
+
+Persist the config with a subclass of `EventActionConfigStore<TConfig>`;
+override `CreateWhenMissing()` to migrate an older install's settings, and
+`OnLoaded(config)` to drop entries a hand-edited file left invalid.
+
+### Self-updating from GitHub Releases
+
+```csharp
+Updates = new CompanionUpdateOptions { RepoOwner = "Battle-Cattle", RepoName = "BCUK-Companion-MyApp" },
+```
+
+turns on a silent check-and-install at launch (release builds only — a
+local build's `0.0.0` version never updates itself) and a "Check for
+updates..." tray menu item. Installing downloads the release zip, verifies
+it against the release's `.sha256` file when there is one, and swaps the
+files in place via a PowerShell script once the app exits, then relaunches it.
+
+Releases must have the shape `.github/workflows/companion-release.yml`
+publishes, so call that reusable workflow from the app's own release
+workflow (see the comment at the top of that file) rather than copying it.
+The app's `.csproj` should set `<Version>0.0.0</Version>`; the workflow
+stamps the real version from the tag.
 
 See `samples/BCUKCompanion.TrayApp.Sample` in this repo for a working
 example (it uses `ProjectReference` instead of `PackageReference` since

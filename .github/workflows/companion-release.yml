@@ -1,0 +1,146 @@
+name: Companion release
+
+# Reusable workflow that publishes a per-user companion app's downloadable Windows build to a
+# GitHub Release, in the shape the shell's self-updater (CompanionUpdateOptions /
+# GitHubReleaseUpdateChecker) expects: a v1.2.3 tag, an <app-name>-v1.2.3-win-x64.zip asset and
+# its <zip>.sha256 checksum. Call it from the app's own release workflow:
+#
+#   jobs:
+#     release:
+#       uses: Battle-Cattle/BCUK-Companion-Core/.github/workflows/companion-release.yml@main
+#       permissions:
+#         contents: write
+#       with:
+#         project: src/MyApp/MyApp.csproj
+#         app-name: MyApp
+#         tag: ${{ inputs.tag }}
+#       secrets:
+#         packages-read-pat: ${{ secrets.PACKAGES_READ_PAT }}
+#
+# The caller decides when it runs; it supports the same three triggers as before:
+# - A push to main that changes VERSION: tags v<VERSION> and releases it (skipped if that
+#   release already exists, so unrelated VERSION edits or re-runs never publish twice).
+# - A pushed v* tag.
+# - workflow_dispatch with an already-pushed tag (pass it as `tag`), e.g. to retry a failed run.
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: "Path to the app's .csproj"
+        required: true
+        type: string
+      app-name:
+        description: "Prefix of the release zip, e.g. BCUKCompanion.ExpiredMinotaur"
+        required: true
+        type: string
+      tag:
+        description: "Existing tag to release (workflow_dispatch runs only)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      packages-read-pat:
+        description: "Classic PAT with read:packages, to restore BCUKCompanion.* from GitHub Packages"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish (Windows x64)
+    runs-on: windows-latest
+    env:
+      PROJECT: ${{ inputs.project }}
+      APP_NAME: ${{ inputs.app-name }}
+      INPUT_TAG: ${{ inputs.tag }}
+    steps:
+      # On a manual run, build the requested tag itself rather than whatever branch the run
+      # was started from; checkout fails if the tag doesn't exist. Otherwise build the exact
+      # pushed commit (not the branch tip, which may have moved on).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.sha }}
+          persist-credentials: false
+
+      # TAG comes from the manual input, the pushed tag, or (on a push to main) VERSION.
+      # CREATE_TAG marks the one mode where the tag doesn't exist yet.
+      - name: Resolve version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $createTag = 'false'
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+            $tag = $env:INPUT_TAG
+          } elseif ($env:GITHUB_REF -like 'refs/tags/*') {
+            $tag = $env:GITHUB_REF_NAME
+          } else {
+            $tag = 'v' + (Get-Content VERSION -Raw).Trim()
+            $createTag = 'true'
+          }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+([-+].*)?$') {
+            throw "Tag '$tag' must look like v1.2.3 (optionally with a -prerelease suffix)."
+          }
+          $skip = 'false'
+          if ($createTag -eq 'true') {
+            # "Not found" is an expected non-zero exit here, not a failure.
+            $PSNativeCommandUseErrorActionPreference = $false
+            gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Release $tag already exists; nothing to do."
+              $skip = 'true'
+            }
+            $global:LASTEXITCODE = 0
+          }
+          "TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VERSION=$($tag.Substring(1))" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "CREATE_TAG=$createTag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SKIP=$skip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        if: env.SKIP != 'true'
+        with:
+          dotnet-version: "8.0.x"
+
+      # Self-contained so end users don't need the .NET runtime installed. Publish does its
+      # own restore so the runtime packs match the self-contained setting.
+      - name: Publish
+        if: env.SKIP != 'true'
+        shell: pwsh
+        env:
+          GITHUB_USERNAME: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.packages-read-pat }}
+        run: >
+          dotnet publish $env:PROJECT
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --output publish
+          "-p:Version=$env:VERSION"
+
+      # The .sha256 file is in sha256sum format; the updater verifies the zip against it.
+      - name: Package
+        if: env.SKIP != 'true'
+        shell: pwsh
+        run: |
+          $zip = "$env:APP_NAME-$env:TAG-win-x64.zip"
+          Compress-Archive -Path publish/* -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zip" | Out-File -FilePath "$zip.sha256" -Encoding ascii -NoNewline
+          "ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # On a main push the tag is created here, on the exact commit that was built. Otherwise the
+      # tag must already exist (--verify-tag). Tags created with GITHUB_TOKEN don't re-trigger
+      # workflows, so this never releases twice.
+      - name: Create GitHub Release
+        if: env.SKIP != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ghArgs = @($env:TAG, $env:ZIP, "$env:ZIP.sha256", '--repo', $env:GITHUB_REPOSITORY, '--title', $env:TAG, '--generate-notes')
+          if ($env:CREATE_TAG -eq 'true') { $ghArgs += @('--target', $env:GITHUB_SHA) } else { $ghArgs += '--verify-tag' }
+          if ($env:VERSION -match '-') { $ghArgs += '--prerelease' }
+          gh release create @ghArgs

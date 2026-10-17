@@ -11,6 +11,7 @@ internal static class Program
         CompanionTrayApplication.Run(new CompanionTrayAppOptions
         {
             DataFolderName = "BCUKCompanion.TrayApp.Sample",
+            DisplayName = "BCUK Companion Sample",
             OnBotEvent = e => Console.WriteLine($"Bot event: {e.EventName} ({string.Join(", ", e.Metadata.Select(kv => $"{kv.Key}={kv.Value}"))})"),
             // No actions are configured in the sample, so it sets no CreateEventActionDispatcher and
             // every advanced command is acknowledged as a failure (the viewer is refunded). A real

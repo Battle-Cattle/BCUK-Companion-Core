@@ -32,31 +32,50 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
 
     public string ConfigFilePath { get; }
 
+    /// <summary>
+    /// Reads the config file: <see cref="CreateWhenMissing"/> supplies the config when there's no
+    /// file yet, a corrupt file is backed up to <c>.bak</c> and replaced by a new
+    /// <typeparamref name="TConfig"/>, and every result passes through <see cref="OnLoaded"/>.
+    /// </summary>
     public TConfig Load()
     {
         lock (syncRoot)
         {
-            if (!File.Exists(ConfigFilePath))
-            {
-                return new TConfig();
-            }
+            return OnLoaded(File.Exists(ConfigFilePath) ? ReadConfigFile() : CreateWhenMissing());
+        }
+    }
 
-            try
-            {
-                var json = File.ReadAllText(ConfigFilePath);
-                return JsonSerializer.Deserialize<TConfig>(json, serializerOptions) ?? new TConfig();
-            }
-            catch (JsonException)
-            {
-                // Only a genuine deserialization failure means the file is corrupt and safe to
-                // reset. A transient sharing violation or permission error (IOException,
-                // UnauthorizedAccessException) must propagate instead: treating those the same
-                // as corruption would hand the caller an empty TConfig indistinguishable from a
-                // real reset, and a subsequent Save() would then overwrite an otherwise-intact
-                // file with that empty snapshot.
-                TryBackUpCorruptConfig();
-                return new TConfig();
-            }
+    /// <summary>
+    /// Supplies the config when the file doesn't exist yet: a new <typeparamref name="TConfig"/>
+    /// by default. Override to migrate an older install's settings, calling <see cref="Save"/> to
+    /// persist the result so the migration runs at most once. Runs under the store's lock, which
+    /// <see cref="Save"/> may re-enter from here.
+    /// </summary>
+    protected virtual TConfig CreateWhenMissing() => new();
+
+    /// <summary>
+    /// Post-processes every loaded config before <see cref="Load"/> returns it — e.g. to drop
+    /// entries a hand-edited file left invalid. Returns <paramref name="config"/> unchanged by default.
+    /// </summary>
+    protected virtual TConfig OnLoaded(TConfig config) => config;
+
+    private TConfig ReadConfigFile()
+    {
+        try
+        {
+            var json = File.ReadAllText(ConfigFilePath);
+            return JsonSerializer.Deserialize<TConfig>(json, serializerOptions) ?? new TConfig();
+        }
+        catch (JsonException)
+        {
+            // Only a genuine deserialization failure means the file is corrupt and safe to
+            // reset. A transient sharing violation or permission error (IOException,
+            // UnauthorizedAccessException) must propagate instead: treating those the same
+            // as corruption would hand the caller an empty TConfig indistinguishable from a
+            // real reset, and a subsequent Save() would then overwrite an otherwise-intact
+            // file with that empty snapshot.
+            TryBackUpCorruptConfig();
+            return new TConfig();
         }
     }
 

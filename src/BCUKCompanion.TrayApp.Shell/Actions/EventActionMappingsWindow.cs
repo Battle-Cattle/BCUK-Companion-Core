@@ -27,9 +27,10 @@ public interface IEventActionMappingsConfig
 /// Owns the "Event Mappings" tab (reward title -> ordered actions, with Add/Edit/Remove/Test)
 /// that every companion app's settings window needs, so each per-user app doesn't have to
 /// reimplement this UI for its own action kinds. Lives in <c>BCUKCompanion.TrayApp.Shell</c>
-/// (rather than each app's own repo) so a new companion app gets it for free; window chrome
-/// (title, size, any extra tabs/panels) and the app-specific action-edit dialog stay with each
-/// subclass.
+/// (rather than each app's own repo) so a new companion app gets it for free, along with the
+/// Add/Edit Action dialog: a subclass only supplies an <see cref="EventActionEditor"/> per
+/// integration (<see cref="CreateActionEditors"/>), and window chrome (title, size, any extra
+/// tabs/panels).
 /// </summary>
 public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig : IEventActionMappingsConfig, new()
 {
@@ -92,9 +93,39 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
 
     protected abstract IEventActionContext BuildContext();
 
-    protected abstract IEventAction? ShowAddActionDialog();
+    /// <summary>
+    /// The categories the Add/Edit Action dialog offers for this app's own action kinds, in
+    /// display order; Core's built-in <see cref="DelayActionEditor"/> is appended after them.
+    /// Called each time the dialog opens, so return new editors every time. Not needed by a
+    /// subclass that overrides <see cref="ShowAddActionDialog"/>/<see cref="ShowEditActionDialog"/>.
+    /// </summary>
+    protected virtual IEnumerable<EventActionEditor> CreateActionEditors() => [];
 
-    protected abstract IEventAction? ShowEditActionDialog(IEventAction existing);
+    /// <summary>Shows the Add Action dialog; returns the new action, or null if cancelled.</summary>
+    protected virtual IEventAction? ShowAddActionDialog() => ShowActionEditDialog(null);
+
+    /// <summary>Shows the Edit Action dialog; returns the edited action, or null if cancelled.</summary>
+    protected virtual IEventAction? ShowEditActionDialog(IEventAction existing) => ShowActionEditDialog(existing);
+
+    private IEventAction? ShowActionEditDialog(IEventAction? existing)
+    {
+        var editors = CreateActionEditors().Append(new DelayActionEditor()).ToList();
+        var dialog = new EventActionEditDialog(editors, BuildContext(), existing) { Owner = this };
+        return dialog.ShowDialog() == true ? dialog.Result : null;
+    }
+
+    /// <summary>
+    /// The window's bottom bar: <see cref="StatusText"/> with <see cref="SaveButton"/> docked to
+    /// its right. Subclasses dock it at the bottom of their own layout.
+    /// </summary>
+    protected UIElement BuildFooter()
+    {
+        var footer = new DockPanel { Margin = new Thickness(12, 8, 12, 12) };
+        DockPanel.SetDock(SaveButton, Dock.Right);
+        footer.Children.Add(SaveButton);
+        footer.Children.Add(StatusText);
+        return footer;
+    }
 
     protected UIElement BuildMappingsTab()
     {
@@ -416,6 +447,30 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         Mappings[idx] = updated;
         if (wasSelected)
             MappingsList.SelectedItem = updated;
+    }
+
+    /// <summary>
+    /// Removes every action matching <paramref name="shouldRemove"/> from every mapping — e.g. the
+    /// actions targeting a device that was just deleted — and returns how many were removed.
+    /// </summary>
+    protected int RemoveActions(Func<IEventAction, bool> shouldRemove)
+    {
+        var removedCount = 0;
+        foreach (var mapping in Mappings.ToList())
+        {
+            var remaining = mapping.Actions.Where(a => !shouldRemove(a)).ToList();
+            if (remaining.Count != mapping.Actions.Count)
+            {
+                removedCount += mapping.Actions.Count - remaining.Count;
+                ReplaceMappingActions(mapping, remaining);
+            }
+        }
+
+        if (removedCount > 0)
+        {
+            RefreshActionsList();
+        }
+        return removedCount;
     }
 
     private async Task OnSaveAsync()
