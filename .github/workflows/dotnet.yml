@@ -18,7 +18,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
       - run: dotnet build src/BCUKCompanion.Core
       - run: dotnet test tests/BCUKCompanion.Core.Tests
 
@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
       - run: dotnet build src/BCUKCompanion.TrayApp.Shell
       - run: dotnet build samples/BCUKCompanion.TrayApp.Sample
 
@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
       - run: dotnet pack src/BCUKCompanion.Core --configuration Release --output ./packages
       - run: dotnet pack src/BCUKCompanion.TrayApp.Shell --configuration Release --output ./packages
       - run: >

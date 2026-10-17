@@ -43,13 +43,13 @@ this repo.
    </configuration>
    ```
 
-2. Create a `WinExe`/`net8.0-windows` project (`UseWPF` and
+2. Create a `WinExe`/`net10.0-windows` project (`UseWPF` and
    `UseWindowsForms` both `true`) that references the two packages:
 
    ```xml
    <ItemGroup>
-     <PackageReference Include="BCUKCompanion.Core" Version="0.10.0" />
-     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.9.0" />
+     <PackageReference Include="BCUKCompanion.Core" Version="0.12.0" />
+     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.11.0" />
    </ItemGroup>
    ```
 

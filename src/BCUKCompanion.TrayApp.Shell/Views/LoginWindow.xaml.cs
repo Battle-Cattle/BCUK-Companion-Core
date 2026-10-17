@@ -101,6 +101,13 @@ public partial class LoginWindow : Window
 
     private static Task OpenBrowserAsync(Uri uri)
     {
+        // UseShellExecute launches whatever the URL points at, so only ever hand it a web URL —
+        // never a file: path or other scheme a mis-set bot host could produce.
+        if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+        {
+            throw new InvalidOperationException($"Refusing to open a non-web login URL ({uri.Scheme}:). Check the server URL.");
+        }
+
         Process.Start(new ProcessStartInfo(uri.ToString()) { UseShellExecute = true });
         return Task.CompletedTask;
     }

@@ -26,7 +26,7 @@ referenced in the guide).
 - `src/BCUKCompanion.TrayApp.Shell` — WPF + WinForms-NotifyIcon tray-app
   shell (login window, settings window, system tray icon, balloon
   notifications), exposed via `CompanionTrayApplication.Run()`.
-  **Windows-only**, requires the `net8.0-windows` / WPF workload — see
+  **Windows-only**, requires the `net10.0-windows` / WPF workload — see
   below. Packed and published as `BCUKCompanion.TrayApp.Shell`.
 - `samples/BCUKCompanion.TrayApp.Sample` — minimal host project showing
   how a per-user app consumes the two packages above (project file +
@@ -50,7 +50,7 @@ apt instead, which is allowed and is much faster:
 
 ```bash
 apt-get update
-apt-get install -y dotnet-sdk-8.0
+apt-get install -y dotnet-sdk-10.0
 ```
 
 This pulls the SDK from Ubuntu's own package mirror (`security.ubuntu.com`
@@ -58,7 +58,7 @@ This pulls the SDK from Ubuntu's own package mirror (`security.ubuntu.com`
 minute versus the multi-step manual installer. Verify with:
 
 ```bash
-dotnet --version   # expect 8.0.1xx
+dotnet --version   # expect 10.0.1xx
 ```
 
 ### Building/testing the Core library and tests (works on Linux)
@@ -73,7 +73,7 @@ dotnet test tests/BCUKCompanion.Core.Tests
 The `Microsoft.NET.Sdk.WindowsDesktop` MSBuild SDK (which provides the
 WPF/WinForms reference assemblies) is only distributed as part of the
 Windows .NET SDK installer — it is not restorable from NuGet and is not
-included in the Linux `dotnet-sdk-8.0` apt package. Attempting
+included in the Linux `dotnet-sdk-10.0` apt package. Attempting
 `dotnet build` on `BCUKCompanion.TrayApp.Shell` or
 `BCUKCompanion.TrayApp.Sample` from Linux fails with
 `MSB4236: The SDK 'Microsoft.NET.Sdk.WindowsDesktop' ... could not be

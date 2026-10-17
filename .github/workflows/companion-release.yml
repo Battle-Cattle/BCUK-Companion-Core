@@ -44,13 +44,15 @@ on:
         description: "Classic PAT with read:packages, to restore BCUKCompanion.* from GitHub Packages"
         required: true
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   release:
     name: Publish (Windows x64)
     runs-on: windows-latest
+    # Only this job needs write access, to create the tag and release.
+    permissions:
+      contents: write
     env:
       PROJECT: ${{ inputs.project }}
       APP_NAME: ${{ inputs.app-name }}
@@ -102,7 +104,7 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         if: env.SKIP != 'true'
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       # Self-contained so end users don't need the .NET runtime installed. Publish does its
       # own restore so the runtime packs match the self-contained setting.
