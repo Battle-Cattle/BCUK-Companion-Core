@@ -83,6 +83,7 @@ public class CompanionEventStreamTests
         Assert.NotNull(redemption);
     }
 
+    /// <summary>With no mark set, the connect-time catch-up delivers every recent activity in id order.</summary>
     [Fact]
     public async Task BackfillsRecentActivityOnConnect()
     {
@@ -209,6 +210,7 @@ public class CompanionEventStreamTests
         Assert.Equal(new[] { "activity", "mark" }, order);
     }
 
+    /// <summary>An activity returned by the catch-up and also sent live is delivered only once.</summary>
     [Fact]
     public async Task ActivityPresentInBothInitialBackfillAndInitialSseBodyIsDispatchedOnce()
     {
@@ -233,6 +235,7 @@ public class CompanionEventStreamTests
         Assert.Equal("Alice", activity.DisplayName);
     }
 
+    /// <summary>A catch-up response the server marked <c>ok: false</c> delivers nothing.</summary>
     [Fact]
     public async Task BackfillIgnoresOkFalseResponse()
     {

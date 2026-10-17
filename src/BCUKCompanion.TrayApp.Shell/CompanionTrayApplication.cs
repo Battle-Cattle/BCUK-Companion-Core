@@ -219,6 +219,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         return client;
     }
 
+    /// <summary>Shows a balloon for a redemption and hands it to the host's handlers and mapped actions.</summary>
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption)
     {
         _ = Dispatcher.InvokeAsync(async () =>
@@ -271,6 +272,11 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
     }
 
+    /// <summary>
+    /// Shows a balloon for a follow/sub/raid/... and hands it to the host's handlers. Queued on the
+    /// UI thread ahead of the matching <see cref="SaveLastActivityEventId"/>, so the id is only
+    /// saved once the activity has been handled.
+    /// </summary>
     private void OnActivityReceived(object? sender, CompanionActivityEvent activity)
     {
         _ = Dispatcher.InvokeAsync(async () =>

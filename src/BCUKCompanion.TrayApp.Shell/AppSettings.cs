@@ -51,6 +51,7 @@ public sealed class AppSettings
         return LoadDefaultsFromBundledConfig();
     }
 
+    /// <summary>Whether <paramref name="botHost"/> is an absolute https URL, as the companion API requires.</summary>
     private static bool IsValidBotHost(string botHost) =>
         Uri.TryCreate(botHost, UriKind.Absolute, out Uri? uri)
         && uri.Scheme == Uri.UriSchemeHttps;
@@ -80,6 +81,7 @@ public sealed class AppSettings
         return settings;
     }
 
+    /// <summary>Writes these settings to settings.json atomically (temp file, then swap).</summary>
     public void Save()
     {
         if (!IsValidBotHost(BotHost))

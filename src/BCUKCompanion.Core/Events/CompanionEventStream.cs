@@ -68,6 +68,9 @@ public sealed class CompanionEventStream
     /// </summary>
     public bool BaselineOnFirstCatchUp { get; set; }
 
+    /// <summary>Creates a stream that connects to <paramref name="botHost"/>'s event endpoints.</summary>
+    /// <param name="httpClient">Used for the SSE connection and the catch-up request.</param>
+    /// <param name="botHost">The bot's base URL.</param>
     public CompanionEventStream(HttpClient httpClient, Uri botHost)
     {
         _httpClient = httpClient;
@@ -277,6 +280,7 @@ public sealed class CompanionEventStream
         }
     }
 
+    /// <summary>Routes one SSE frame to the redemption, activity or advanced-command handler by its <c>type</c>.</summary>
     private void HandleEvent(SseEvent sseEvent)
     {
         if (string.IsNullOrWhiteSpace(sseEvent.Data))
@@ -337,6 +341,10 @@ public sealed class CompanionEventStream
         }
     }
 
+    /// <summary>
+    /// Whether an activity (live or from the catch-up) has a known type, a display name, a
+    /// timestamp and a positive id; anything else is dropped rather than shown.
+    /// </summary>
     private static bool IsValidActivity(CompanionActivityEvent? activity)
     {
         if (activity is null)
@@ -382,6 +390,7 @@ public sealed class CompanionEventStream
         LastActivityEventIdChanged?.Invoke(this, activity.Id);
     }
 
+    /// <summary>Parses a channel-point redemption frame and raises <see cref="RedemptionReceived"/> if it's complete.</summary>
     private void HandleRedemptionEvent(string data)
     {
         RedemptionEvent? redemption;
