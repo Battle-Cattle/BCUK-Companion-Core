@@ -20,8 +20,12 @@ public sealed class AppSettings
     /// </summary>
     public Dictionary<string, long> LastActivityEventIds { get; set; } = new();
 
-    /// <summary>The <see cref="LastActivityEventIds"/> key for a bot host: its URL, lower-cased, without a trailing slash.</summary>
-    public static string ActivityKey(Uri botHost) => botHost.GetLeftPart(UriPartial.Path).TrimEnd('/').ToLowerInvariant();
+    /// <summary>
+    /// The <see cref="LastActivityEventIds"/> key for a bot host: its scheme, host and port,
+    /// lower-cased. The event endpoints are root-relative, so any path in the configured URL
+    /// doesn't change which event stream is read and must not split its saved id.
+    /// </summary>
+    public static string ActivityKey(Uri botHost) => botHost.GetLeftPart(UriPartial.Authority).ToLowerInvariant();
 
     /// <summary>
     /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
