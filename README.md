@@ -43,7 +43,7 @@ this repo.
    </configuration>
    ```
 
-2. Create a `WinExe`/`net8.0-windows` project (`UseWPF` and
+2. Create a `WinExe`/`net10.0-windows` project (`UseWPF` and
    `UseWindowsForms` both `true`) that references the two packages:
 
    ```xml
