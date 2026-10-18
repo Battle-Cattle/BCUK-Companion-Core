@@ -87,4 +87,36 @@ public class AdvancedCommandClientTests
         using CompanionClient noToken = CreateClient(handler, token: null);
         await Assert.ThrowsAsync<InvalidOperationException>(() => noToken.AckAdvancedCommandAsync("e1", ok: true));
     }
+
+    [Fact]
+    public async Task AckRedemptionAsync_PostsTheAcknowledgementToTheRewardsRoute()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """{"ok":true,"resolved":true}""");
+        using CompanionClient client = CreateClient(handler);
+
+        bool resolved = await client.AckRedemptionAsync("red-1", ok: false, error: "Lamp offline");
+
+        Assert.True(resolved);
+        HttpRequestMessage request = handler.LastRequest!;
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/companion/rewards/ack", request.RequestUri!.AbsolutePath);
+        Assert.Equal("abc123", request.Headers.Authorization?.Parameter);
+        using JsonDocument body = JsonDocument.Parse(handler.LastRequestBody!);
+        Assert.Equal("red-1", body.RootElement.GetProperty("eventId").GetString());
+        Assert.False(body.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("Lamp offline", body.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task AckRedemptionAsync_ReportsAnAlreadyResolvedRedemptionAndThrowsOn404()
+    {
+        var resolvedHandler = new FakeHttpMessageHandler(HttpStatusCode.OK, """{"ok":true,"resolved":false}""");
+        using CompanionClient client = CreateClient(resolvedHandler);
+        Assert.False(await client.AckRedemptionAsync("red-1", ok: true));
+
+        var notFound = new FakeHttpMessageHandler(HttpStatusCode.NotFound, """{"ok":false,"error":"event_not_found"}""");
+        using CompanionClient other = CreateClient(notFound);
+        var ex = await Assert.ThrowsAsync<CompanionApiException>(() => other.AckRedemptionAsync("red-1", ok: true));
+        Assert.Equal("event_not_found", ex.Message);
+    }
 }

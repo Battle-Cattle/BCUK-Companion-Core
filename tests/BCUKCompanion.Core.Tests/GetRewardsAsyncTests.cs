@@ -37,7 +37,8 @@ public class GetRewardsAsyncTests
                   "cost": 500,
                   "backgroundColor": "#ff0000",
                   "isEnabled": true,
-                  "isUserInputRequired": false
+                  "isUserInputRequired": false,
+                  "companionConfirmationRequired": true
                 }
               ]
             }
@@ -54,6 +55,7 @@ public class GetRewardsAsyncTests
         Assert.Equal("#ff0000", reward.BackgroundColor);
         Assert.True(reward.IsEnabled);
         Assert.False(reward.IsUserInputRequired);
+        Assert.True(reward.CompanionConfirmationRequired);
 
         Assert.NotNull(handler.LastRequest);
         Assert.Equal("Bearer", handler.LastRequest!.Headers.Authorization?.Scheme);

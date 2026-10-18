@@ -222,18 +222,26 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         return client;
     }
 
-    /// <summary>Shows a balloon for a redemption and hands it to the host's handlers and mapped actions.</summary>
+    /// <summary>
+    /// Shows a balloon for a redemption and hands it to the host's handlers and mapped actions,
+    /// then acknowledges it to the bot when its reward requires companion confirmation — a
+    /// failure there cancels the redemption and refunds the viewer.
+    /// </summary>
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption)
     {
+        // Captured now: a bot-host change can replace _companionClient while the actions run,
+        // and the acknowledgement must go to the host the event came from.
+        CompanionClient client = _companionClient;
         _ = Dispatcher.InvokeAsync(async () =>
         {
             string who = string.IsNullOrEmpty(redemption.UserName) ? redemption.UserLogin : redemption.UserName;
             _trayIcon.ShowBalloon(redemption.RewardTitle, $"Redeemed by {who}");
 
-            await HandleBotEventAsync(new BotEventArgs(
+            (bool ok, string? error) = await HandleBotEventAsync(new BotEventArgs(
                 EventActionDispatcher.RedemptionEventName,
                 new Dictionary<string, string?>
                 {
+                    ["redemptionId"] = redemption.Id,
                     ["rewardId"] = redemption.RewardId,
                     ["rewardTitle"] = redemption.RewardTitle,
                     ["userLogin"] = redemption.UserLogin,
@@ -241,6 +249,20 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                     ["userInput"] = redemption.UserInput,
                     ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
                 })).ConfigureAwait(true);
+            if (!redemption.AckRequired || string.IsNullOrEmpty(redemption.Id))
+            {
+                return;
+            }
+
+            try
+            {
+                await client.AckRedemptionAsync(redemption.Id, ok, error).ConfigureAwait(true);
+            }
+            catch (Exception)
+            {
+                // Couldn't reach the bot: it refunds the viewer once its acknowledgement timeout
+                // passes, which is the right outcome when we can't say the actions ran.
+            }
         });
     }
 
@@ -343,7 +365,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// <see cref="CompanionTrayAppOptions.OnBotEventAsync"/>, then (when the host set
     /// <see cref="CompanionTrayAppOptions.CreateEventActionDispatcher"/>) the event's mapped
     /// actions, with a balloon for any that fail. Returns the acknowledgement an advanced command
-    /// should send; the other event kinds ignore it.
+    /// or a confirmation-required redemption should send; the other events ignore it.
     /// </summary>
     private async Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent)
     {

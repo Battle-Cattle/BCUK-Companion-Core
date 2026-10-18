@@ -157,9 +157,16 @@ Behavior:
 - Sends a real event whenever the user's Twitch channel has a channel-point
   redemption:
   ```
-  data: {"type":"channel_points_redemption","rewardId":"...","rewardTitle":"...","userLogin":"...","userName":"...","userInput":"...","redeemedAt":"2026-06-27T12:34:56.000Z"}
+  data: {"type":"channel_points_redemption","id":"<twitch redemption id>","rewardId":"...","rewardTitle":"...","userLogin":"...","userName":"...","userInput":"...","ackRequired":false,"redeemedAt":"2026-06-27T12:34:56.000Z"}
 
   ```
+  `ackRequired` is true when the streamer turned on **companion
+  confirmation** for the reward (on the bot's Channel Points page). The app
+  then **must** acknowledge the redemption (see below) — if it reports a
+  failure or doesn't answer within 30 seconds, and immediately if no
+  companion app is connected at all, the bot cancels the redemption on
+  Twitch (refunding the viewer's points) and takes it back off the reward's
+  dynamic price. A success marks the redemption fulfilled on Twitch.
 - Sends an `advanced_command` event whenever one of the streamer's advanced
   commands (managed on the bot's `/advanced-commands` page) is used — from
   chat, where the viewer paid loyalty points, or free from the streamer's
@@ -195,9 +202,10 @@ All take the same `Authorization: Bearer <token>` header and answer with an
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/companion/events/recent` | Activity events (not redemptions or commands) missed while disconnected — call after each reconnect |
-| `GET /api/companion/rewards` | The streamer's Twitch channel-point rewards: `id`, `title`, `prompt`, `cost`, `backgroundColor`, `isEnabled`, `isUserInputRequired` |
+| `GET /api/companion/rewards` | The streamer's Twitch channel-point rewards: `id`, `title`, `prompt`, `cost`, `backgroundColor`, `isEnabled`, `isUserInputRequired`, `companionConfirmationRequired` |
 | `GET /api/companion/commands` | The streamer's advanced commands: `id`, `name`, `trigger`, `pointCost`, `isEnabled`, `companionEnabled`, `parameters` |
 | `POST /api/companion/commands/ack` | Body `{"eventId":"<id>","ok":true\|false,"error":"optional text"}`. Reports whether the app ran an `advanced_command` event's actions; `ok: false` refunds the viewer. Responds `{ "ok": true, "resolved": false }` if the bot had already resolved the use (e.g. timed out), and `404` for another streamer's or an unknown event |
+| `POST /api/companion/rewards/ack` | Same body and responses, with `eventId` set to a `channel_points_redemption` event's `id`. Reports whether the app ran the actions for a redemption sent with `ackRequired: true`; `ok: true` fulfils it on Twitch, `ok: false` cancels it and refunds the viewer |
 
 ## Error reference
 
