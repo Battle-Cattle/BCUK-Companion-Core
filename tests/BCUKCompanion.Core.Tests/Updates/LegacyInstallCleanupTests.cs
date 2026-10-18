@@ -79,6 +79,39 @@ public sealed class LegacyInstallCleanupTests : IDisposable
     }
 
     [Fact]
+    public void Run_RemovesFrameworkLeftoversNoDepsJsonLists()
+    {
+        // What an install updated from a .NET 8 multi-file build still held: the framework's
+        // translations and an older runtime's versioned DAC, neither listed in any deps.json.
+        Touch("MyApp.exe");
+        Touch("appsettings.json");
+        Touch("mscordaccore_amd64_amd64_8.0.3126.42015.dll");
+        Touch("cs", "PresentationCore.resources.dll");
+        Touch("zh-Hans", "System.Windows.Forms.resources.dll");
+        Touch("pt-BR", "PresentationFramework.resources.dll");
+        Touch("de", "PresentationCore.resources.dll");
+        Touch("de", "notes.txt");
+        Touch("Plugins", "Foo.resources.dll");
+        Touch("fr", "nested", "Bar.resources.dll");
+        Directory.CreateDirectory(Path.Combine(installDir, "ja"));
+
+        Assert.True(LegacyInstallCleanup.Run(installDir, "MyApp"));
+
+        Assert.Equal(
+            new[]
+            {
+                "MyApp.exe", "appsettings.json", Path.Combine("Plugins", "Foo.resources.dll"),
+                Path.Combine("de", "PresentationCore.resources.dll"), Path.Combine("de", "notes.txt"),
+                Path.Combine("fr", "nested", "Bar.resources.dll"),
+            }.Order(),
+            Directory.EnumerateFiles(installDir, "*", SearchOption.AllDirectories)
+                .Select(f => Path.GetRelativePath(installDir, f)).Order());
+        Assert.False(Directory.Exists(Path.Combine(installDir, "cs")));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "zh-Hans")));
+        Assert.True(Directory.Exists(Path.Combine(installDir, "ja")));
+    }
+
+    [Fact]
     public void Run_WithoutDepsJson_DoesNothing()
     {
         Touch("MyApp.exe");

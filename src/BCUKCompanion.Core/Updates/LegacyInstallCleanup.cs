@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace BCUKCompanion.Core.Updates;
 
@@ -9,9 +10,13 @@ namespace BCUKCompanion.Core.Updates;
 /// holds the old build's runtime, assemblies and translation folders.
 /// </summary>
 /// <remarks>
-/// Only files the old build's own <c>&lt;app&gt;.deps.json</c> lists are removed (plus that
-/// build's <c>.pdb</c> files, <c>runtimeconfig.json</c> and the deps.json itself), so anything a
-/// user dropped into the folder is left alone. The deps.json is deleted last, and only once
+/// Files the old build's own <c>&lt;app&gt;.deps.json</c> lists are removed (plus that build's
+/// <c>.pdb</c> files, <c>runtimeconfig.json</c> and the deps.json itself). The deps.json doesn't
+/// list the framework's own translations or the versioned <c>mscordaccore_*.dll</c> of a runtime
+/// older than the last multi-file build, so those are removed by shape instead: culture-named
+/// folders holding nothing but <c>*.resources.dll</c>, and <c>mscordaccore_*.dll</c> files. A
+/// single-file build bundles its own satellites, so it never ships either. Anything else a user
+/// dropped into the folder is left alone. The deps.json is deleted last, and only once
 /// everything else is gone, so a file that is locked this time is retried on the next launch.
 /// Hosts must only call this from a single-file build: a multi-file build still needs these files.
 /// </remarks>
@@ -23,7 +28,10 @@ public static class LegacyInstallCleanup
     /// </summary>
     /// <param name="installDir">The folder the running executable is in.</param>
     /// <param name="appName">The executable's name without <c>.exe</c>, e.g. <c>MyApp</c>.</param>
-    public static bool Run(string installDir, string appName)
+    public static bool Run(string installDir, string appName) =>
+        RemoveListedFiles(installDir, appName) & RemoveUnlistedRuntimeFiles(installDir);
+
+    private static bool RemoveListedFiles(string installDir, string appName)
     {
         string depsFile = Path.Combine(installDir, $"{appName}.deps.json");
         if (!File.Exists(depsFile))
@@ -175,6 +183,51 @@ public static class LegacyInstallCleanup
     private static bool IsSafeAssetPath(string path) =>
         !Path.IsPathRooted(path)
         && path.Split('/', '\\').All(segment => segment is not "." and not "..");
+
+    // Culture names as .NET names its satellite folders: cs, zh-Hans, pt-BR, sr-Latn-RS.
+    private static readonly Regex CultureFolderName = new("^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", RegexOptions.CultureInvariant);
+
+    private static bool RemoveUnlistedRuntimeFiles(string installDir)
+    {
+        try
+        {
+            bool allDeleted = true;
+            foreach (string file in Directory.EnumerateFiles(installDir, "mscordaccore_*.dll"))
+            {
+                allDeleted &= TryDelete(file);
+            }
+
+            foreach (string dir in Directory.EnumerateDirectories(installDir).Where(IsSatelliteFolder))
+            {
+                foreach (string file in Directory.EnumerateFiles(dir))
+                {
+                    allDeleted &= TryDelete(file);
+                }
+
+                TryDeleteIfEmpty(dir);
+            }
+
+            return allDeleted;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    // A folder only the .NET build output would create: a culture name, no subfolders, and
+    // nothing but satellite assemblies. A junction is never followed.
+    private static bool IsSatelliteFolder(string dir)
+    {
+        if (!CultureFolderName.IsMatch(Path.GetFileName(dir)) || IsReparsePoint(dir)
+            || Directory.EnumerateDirectories(dir).Any())
+        {
+            return false;
+        }
+
+        var files = Directory.GetFiles(dir);
+        return files.Length > 0 && files.All(f => f.EndsWith(".resources.dll", StringComparison.OrdinalIgnoreCase));
+    }
 
     private static bool IsReparsePoint(string dir)
     {
