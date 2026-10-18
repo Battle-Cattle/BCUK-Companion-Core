@@ -94,7 +94,9 @@ The zip is a single-file, self-contained build (just the `.exe` and
 `appsettings.json`). The updater only ever copies files over the install
 folder, so on launch a single-file build removes whatever an older
 multi-file release left behind, using that build's `<app>.deps.json` as the
-list (`LegacyInstallCleanup`).
+list (`LegacyInstallCleanup`). The deps.json doesn't list the framework's own
+translation folders or an older runtime's `mscordaccore_*.dll`, so those are
+removed by shape (culture-named folders of only `*.resources.dll`).
 
 ## Publishing packages
 
