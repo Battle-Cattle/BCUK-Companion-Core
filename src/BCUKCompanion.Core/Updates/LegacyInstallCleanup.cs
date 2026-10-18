@@ -204,7 +204,7 @@ public static class LegacyInstallCleanup
                     allDeleted &= TryDelete(file);
                 }
 
-                TryDeleteIfEmpty(dir);
+                allDeleted &= TryDeleteIfEmpty(dir);
             }
 
             return allDeleted;
@@ -216,7 +216,8 @@ public static class LegacyInstallCleanup
     }
 
     // A folder only the .NET build output would create: a culture name, no subfolders, and
-    // nothing but satellite assemblies. A junction is never followed.
+    // nothing but satellite assemblies. An empty one counts too, so a folder whose delete failed
+    // after its files went is retried next launch. A junction is never followed.
     private static bool IsSatelliteFolder(string dir)
     {
         if (!CultureFolderName.IsMatch(Path.GetFileName(dir)) || IsReparsePoint(dir)
@@ -226,7 +227,7 @@ public static class LegacyInstallCleanup
         }
 
         var files = Directory.GetFiles(dir);
-        return files.Length > 0 && files.All(f => f.EndsWith(".resources.dll", StringComparison.OrdinalIgnoreCase));
+        return files.All(f => f.EndsWith(".resources.dll", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsReparsePoint(string dir)
@@ -260,7 +261,8 @@ public static class LegacyInstallCleanup
         }
     }
 
-    private static void TryDeleteIfEmpty(string dir)
+    // True if the folder is gone; a folder that still has something in it is left alone.
+    private static bool TryDeleteIfEmpty(string dir)
     {
         try
         {
@@ -268,9 +270,12 @@ public static class LegacyInstallCleanup
             {
                 Directory.Delete(dir);
             }
+
+            return !Directory.Exists(dir);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            return false;
         }
     }
 }

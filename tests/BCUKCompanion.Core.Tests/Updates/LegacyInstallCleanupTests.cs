@@ -108,7 +108,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
                 .Select(f => Path.GetRelativePath(installDir, f)).Order());
         Assert.False(Directory.Exists(Path.Combine(installDir, "cs")));
         Assert.False(Directory.Exists(Path.Combine(installDir, "zh-Hans")));
-        Assert.True(Directory.Exists(Path.Combine(installDir, "ja")));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "ja")));
     }
 
     [Fact]
