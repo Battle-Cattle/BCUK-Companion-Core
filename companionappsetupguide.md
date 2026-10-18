@@ -163,8 +163,9 @@ Behavior:
   `ackRequired` is true when the streamer turned on **companion
   confirmation** for the reward (on the bot's Channel Points page). The app
   then **must** acknowledge the redemption (see below) — if it reports a
-  failure or doesn't answer within 3 minutes, and immediately if no
-  companion app is connected at all, the bot cancels the redemption on
+  failure or doesn't answer within 3 minutes (restarted by each progress
+  ping, see below), and immediately if no companion app is connected at
+  all, the bot cancels the redemption on
   Twitch (refunding the viewer's points) and takes it back off the reward's
   dynamic price. A success marks the redemption fulfilled on Twitch.
 - Sends an `advanced_command` event whenever one of the streamer's advanced
@@ -179,8 +180,8 @@ Behavior:
   for the Stream Deck). `parameters` are key/value pairs the streamer set on
   the command. When `ackRequired` is true the app **must** acknowledge the
   event (see below) — the viewer is refunded if it reports a failure or
-  doesn't answer within 3 minutes, and immediately if no companion app is
-  connected at all.
+  doesn't answer within 3 minutes (restarted by each progress ping, see
+  below), and immediately if no companion app is connected at all.
 - Also sends follow/sub/resub/giftsub/raid activity events (`type` is the
   activity, plus `id`, `displayName`, `detail` and `occurredAt`).
 - `401` if the bearer token is missing/invalid/revoked — the app should stop
@@ -206,6 +207,8 @@ All take the same `Authorization: Bearer <token>` header and answer with an
 | `GET /api/companion/commands` | The streamer's advanced commands: `id`, `name`, `trigger`, `pointCost`, `isEnabled`, `companionEnabled`, `parameters` |
 | `POST /api/companion/commands/ack` | Body `{"eventId":"<id>","ok":true\|false,"error":"optional text"}`. Reports whether the app ran an `advanced_command` event's actions; `ok: false` refunds the viewer. Responds `{ "ok": true, "resolved": false }` if the bot had already resolved the use (e.g. timed out), and `404` for another streamer's or an unknown event |
 | `POST /api/companion/rewards/ack` | Same body and responses, with `eventId` set to a `channel_points_redemption` event's `id`. Reports whether the app ran the actions for a redemption sent with `ackRequired: true`; `ok: true` fulfils it on Twitch, `ok: false` cancels it and refunds the viewer |
+| `POST /api/companion/commands/progress` | Body `{"eventId":"<id>"}`. Sent while the app is still running an `advanced_command` event's actions (the Shell sends one a minute): restarts the 3-minute acknowledgement timeout, so long actions (e.g. Delay actions) aren't refunded mid-run. Responds `{ "ok": true, "extended": false }` once the bot is no longer waiting for the event, or after it has been held for 2 hours in all; `404` as for `/ack` (including from a bot that predates progress pings — ignore it) |
+| `POST /api/companion/rewards/progress` | Same body and responses as `/commands/progress`, for a `channel_points_redemption` event sent with `ackRequired: true` |
 
 ## Error reference
 

@@ -165,6 +165,41 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>
+    /// Tells the bot this app is still running an <see cref="AdvancedCommandEvent"/>'s actions, via
+    /// POST /api/companion/commands/progress, so a long run (e.g. Delay actions) isn't refunded before
+    /// <see cref="AckAdvancedCommandAsync"/> is sent. Each call restarts the bot's acknowledgement
+    /// timeout, up to a cap the bot sets.
+    /// </summary>
+    /// <param name="eventId">The event's <see cref="AdvancedCommandEvent.Id"/>.</param>
+    /// <returns>True if the timeout was restarted; false if the bot is no longer waiting for this event.</returns>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status (including 404 from a bot that predates progress pings) or an unparseable body.</exception>
+    public Task<bool> ReportCommandProgressAsync(string eventId, CancellationToken cancellationToken = default)
+        => ReportProgressAsync("/api/companion/commands/progress", eventId, "Reporting command progress", cancellationToken);
+
+    /// <summary>
+    /// Tells the bot this app is still running the actions for a <see cref="RedemptionEvent"/> sent with
+    /// <see cref="RedemptionEvent.AckRequired"/>, via POST /api/companion/rewards/progress — see
+    /// <see cref="ReportCommandProgressAsync"/>.
+    /// </summary>
+    /// <param name="redemptionId">The event's <see cref="RedemptionEvent.Id"/>.</param>
+    /// <returns>True if the timeout was restarted; false if the bot is no longer waiting for this redemption.</returns>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
+    public Task<bool> ReportRedemptionProgressAsync(string redemptionId, CancellationToken cancellationToken = default)
+        => ReportProgressAsync("/api/companion/rewards/progress", redemptionId, "Reporting redemption progress", cancellationToken);
+
+    private async Task<bool> ReportProgressAsync(string path, string eventId, string operationDescription, CancellationToken cancellationToken)
+    {
+        var body = JsonSerializer.Serialize(new { eventId });
+        ProgressResponse parsed = await SendAsync<ProgressResponse>(
+            HttpMethod.Post, path, body, operationDescription, cancellationToken).ConfigureAwait(false);
+        return parsed.Extended;
+    }
+
+    /// <summary>
     /// Sends an authenticated GET to a companion API path and deserializes the response body as
     /// <typeparamref name="TResponse"/>. Shared by every simple request/response companion
     /// endpoint (as opposed to <see cref="Events"/>, which is long-lived/streaming). Every
@@ -284,6 +319,18 @@ public sealed class CompanionClient : IDisposable
 
         [JsonPropertyName("resolved")]
         public bool Resolved { get; set; }
+
+        [JsonPropertyName("error")]
+        public string? Error { get; set; }
+    }
+
+    private sealed class ProgressResponse : IApiEnvelope
+    {
+        [JsonPropertyName("ok")]
+        public bool Ok { get; set; }
+
+        [JsonPropertyName("extended")]
+        public bool Extended { get; set; }
 
         [JsonPropertyName("error")]
         public string? Error { get; set; }

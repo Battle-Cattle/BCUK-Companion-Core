@@ -105,4 +105,55 @@ public class AdvancedCommandClientTests
         using CompanionClient noToken = CreateClient(handler, token: null);
         await Assert.ThrowsAsync<InvalidOperationException>(() => SendAck(noToken, call, "e1", ok: true));
     }
+
+    /// <summary>Both progress calls, by name, with the route each one posts to.</summary>
+    public static TheoryData<string, string> ProgressCalls => new()
+    {
+        { nameof(CompanionClient.ReportCommandProgressAsync), "/api/companion/commands/progress" },
+        { nameof(CompanionClient.ReportRedemptionProgressAsync), "/api/companion/rewards/progress" },
+    };
+
+    private static Task<bool> SendProgress(CompanionClient client, string call, string eventId) => call switch
+    {
+        nameof(CompanionClient.ReportCommandProgressAsync) => client.ReportCommandProgressAsync(eventId),
+        _ => client.ReportRedemptionProgressAsync(eventId),
+    };
+
+    [Theory]
+    [MemberData(nameof(ProgressCalls))]
+    public async Task Progress_PostsTheEventIdToItsRoute(string call, string path)
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """{"ok":true,"extended":true}""");
+        using CompanionClient client = CreateClient(handler);
+
+        Assert.True(await SendProgress(client, call, "e1"));
+
+        HttpRequestMessage request = handler.LastRequest!;
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(path, request.RequestUri!.AbsolutePath);
+        Assert.Equal("abc123", request.Headers.Authorization?.Parameter);
+        using JsonDocument body = JsonDocument.Parse(handler.LastRequestBody!);
+        Assert.Equal("e1", body.RootElement.GetProperty("eventId").GetString());
+    }
+
+    [Theory]
+    [MemberData(nameof(ProgressCalls))]
+    public async Task Progress_ReportsAnEventTheBotIsNoLongerWaitingFor(string call, string path)
+    {
+        _ = path;
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """{"ok":true,"extended":false}""");
+        using CompanionClient client = CreateClient(handler);
+
+        Assert.False(await SendProgress(client, call, "e1"));
+    }
+
+    [Fact]
+    public async Task Progress_ThrowsForABotWithoutProgressPings()
+    {
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.NotFound, "<html>Page not found.</html>");
+        using CompanionClient client = CreateClient(handler);
+
+        var ex = await Assert.ThrowsAsync<CompanionApiException>(() => client.ReportCommandProgressAsync("e1"));
+        Assert.Equal(404, ex.StatusCode);
+    }
 }
