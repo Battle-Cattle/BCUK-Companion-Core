@@ -163,7 +163,7 @@ Behavior:
   `ackRequired` is true when the streamer turned on **companion
   confirmation** for the reward (on the bot's Channel Points page). The app
   then **must** acknowledge the redemption (see below) — if it reports a
-  failure or doesn't answer within 30 seconds, and immediately if no
+  failure or doesn't answer within 3 minutes, and immediately if no
   companion app is connected at all, the bot cancels the redemption on
   Twitch (refunding the viewer's points) and takes it back off the reward's
   dynamic price. A success marks the redemption fulfilled on Twitch.
@@ -179,7 +179,7 @@ Behavior:
   for the Stream Deck). `parameters` are key/value pairs the streamer set on
   the command. When `ackRequired` is true the app **must** acknowledge the
   event (see below) — the viewer is refunded if it reports a failure or
-  doesn't answer within 30 seconds, and immediately if no companion app is
+  doesn't answer within 3 minutes, and immediately if no companion app is
   connected at all.
 - Also sends follow/sub/resub/giftsub/raid activity events (`type` is the
   activity, plus `id`, `displayName`, `detail` and `occurredAt`).
