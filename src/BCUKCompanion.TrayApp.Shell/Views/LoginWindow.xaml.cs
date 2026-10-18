@@ -54,7 +54,10 @@ public partial class LoginWindow : Window
             return;
         }
 
-        ServerStatusText.Text = "Server updated. No connection has been made yet — log in to this server.";
+        // A change that keeps the same server (e.g. only the path) keeps the session; any other logs out.
+        ServerStatusText.Text = _companionClient.IsLoggedIn
+            ? "Server updated. You're still logged in to this server."
+            : "Server updated. No connection has been made yet — log in to this server.";
     }
 
     private async void LoginWithBrowserButton_Click(object sender, RoutedEventArgs e)

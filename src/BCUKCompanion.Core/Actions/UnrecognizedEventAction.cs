@@ -21,6 +21,7 @@ public sealed class UnrecognizedEventAction : IEventAction
         Reason = reason;
     }
 
+    /// <summary>The saved <c>kind</c>, or an empty string if it had none.</summary>
     [JsonIgnore]
     public string Kind { get; }
 
@@ -32,10 +33,13 @@ public sealed class UnrecognizedEventAction : IEventAction
     [JsonIgnore]
     public string Reason { get; }
 
+    /// <summary>Shows the action as unrecognized, with its saved kind when it has one.</summary>
     public string Describe(IEventActionContext context) =>
         string.IsNullOrEmpty(Kind) ? "Unrecognized action" : $"Unrecognized action ({Kind})";
 
+    /// <summary>Always fails with <see cref="Reason"/>, so the action is never run.</summary>
     public IReadOnlyList<string> Validate(IEventActionContext context) => [Reason];
 
+    /// <summary>Never reached (<see cref="Validate"/> always fails); reports failure if called directly.</summary>
     public Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken) => Task.FromResult(false);
 }

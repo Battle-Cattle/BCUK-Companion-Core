@@ -6,6 +6,18 @@ namespace BCUKCompanion.Core.Tests.Actions;
 public class AckProgressPingerTests
 {
     private static readonly TimeSpan FastInterval = TimeSpan.FromMilliseconds(20);
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Waits until <paramref name="pings"/> reaches <paramref name="target"/>, failing (not hanging) after <see cref="TestTimeout"/>.</summary>
+    private static async Task WaitForPingsAsync(Func<int> pings, int target)
+    {
+        DateTime deadline = DateTime.UtcNow + TestTimeout;
+        while (pings() < target)
+        {
+            Assert.True(DateTime.UtcNow < deadline, $"Timed out waiting for {target} pings (got {pings()}).");
+            await Task.Delay(5);
+        }
+    }
 
     [Fact]
     public async Task PingsWhileTheWorkRuns_AndReturnsItsResult()
@@ -18,10 +30,7 @@ public class AckProgressPingerTests
             _ => { Interlocked.Increment(ref pings); return Task.CompletedTask; },
             FastInterval);
 
-        while (Volatile.Read(ref pings) < 3)
-        {
-            await Task.Delay(5);
-        }
+        await WaitForPingsAsync(() => Volatile.Read(ref pings), 3);
 
         release.SetResult("done");
         Assert.Equal("done", await run);
@@ -56,10 +65,7 @@ public class AckProgressPingerTests
                 : Task.CompletedTask,
             FastInterval);
 
-        while (Volatile.Read(ref pings) < 2)
-        {
-            await Task.Delay(5);
-        }
+        await WaitForPingsAsync(() => Volatile.Read(ref pings), 2);
 
         release.SetResult(true);
         Assert.True(await run);

@@ -191,6 +191,7 @@ public sealed class CompanionClient : IDisposable
     public Task<bool> ReportRedemptionProgressAsync(string redemptionId, CancellationToken cancellationToken = default)
         => ReportProgressAsync("/api/companion/rewards/progress", redemptionId, "Reporting redemption progress", cancellationToken);
 
+    /// <summary>POSTs <c>{ eventId }</c> to a progress route and returns the bot's <c>extended</c> flag.</summary>
     private async Task<bool> ReportProgressAsync(string path, string eventId, string operationDescription, CancellationToken cancellationToken)
     {
         var body = JsonSerializer.Serialize(new { eventId });

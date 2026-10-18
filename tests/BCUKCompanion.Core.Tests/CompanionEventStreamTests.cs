@@ -461,10 +461,6 @@ public class CompanionEventStreamTests
         }
     }
 
-    /// <summary>
-    /// Routes GET /api/companion/events/recent to a fixed backfill body and every
-    /// other request (the SSE stream itself) to a fixed SSE body.
-    /// </summary>
     /// <summary>Accepts the SSE connection but never answers the catch-up request until canceled.</summary>
     private sealed class HangingRecentHttpMessageHandler : HttpMessageHandler
     {
@@ -479,6 +475,10 @@ public class CompanionEventStreamTests
         }
     }
 
+    /// <summary>
+    /// Routes GET /api/companion/events/recent to a fixed backfill body and every
+    /// other request (the SSE stream itself) to a fixed SSE body.
+    /// </summary>
     private sealed class RoutingHttpMessageHandler : HttpMessageHandler
     {
         private readonly string _sseBody;

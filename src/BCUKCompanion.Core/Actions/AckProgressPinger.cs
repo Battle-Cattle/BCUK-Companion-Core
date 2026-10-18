@@ -35,6 +35,7 @@ public static class AckProgressPinger
         }
     }
 
+    /// <summary>Sends <paramref name="ping"/> every <paramref name="interval"/>, ignoring failures, until <paramref name="cancellationToken"/> is canceled.</summary>
     private static async Task PingUntilCanceledAsync(Func<CancellationToken, Task> ping, TimeSpan interval, CancellationToken cancellationToken)
     {
         while (true)
