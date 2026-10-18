@@ -102,15 +102,7 @@ public static class LegacyInstallCleanup
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllBytes(depsFile));
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object
-                || !root.TryGetProperty("runtimeTarget", out var runtimeTarget)
-                || runtimeTarget.ValueKind != JsonValueKind.Object
-                || !runtimeTarget.TryGetProperty("name", out var targetName)
-                || targetName.ValueKind != JsonValueKind.String
-                || !root.TryGetProperty("targets", out var targets)
-                || targets.ValueKind != JsonValueKind.Object
-                || !targets.TryGetProperty(targetName.GetString()!, out var target))
+            if (GetActiveTarget(doc.RootElement) is not { } target)
             {
                 return null;
             }
@@ -124,6 +116,26 @@ public static class LegacyInstallCleanup
             return null;
         }
     }
+
+    // The target named by runtimeTarget.name, or null if the file doesn't have one.
+    private static JsonElement? GetActiveTarget(JsonElement root)
+    {
+        if (GetObject(root, "runtimeTarget") is not { } runtimeTarget
+            || !runtimeTarget.TryGetProperty("name", out var name)
+            || name.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        return GetObject(root, "targets") is { } targets ? GetObject(targets, name.GetString()!) : null;
+    }
+
+    private static JsonElement? GetObject(JsonElement element, string propertyName) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.TryGetProperty(propertyName, out var value)
+        && value.ValueKind == JsonValueKind.Object
+            ? value
+            : null;
 
     private static IEnumerable<(string? Locale, string FileName)> ReadLibraryEntries(JsonElement library)
     {
