@@ -35,7 +35,9 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// <summary>
     /// Reads the config file: <see cref="CreateWhenMissing"/> supplies the config when there's no
     /// file yet, a corrupt file is backed up to <c>.bak</c> and replaced by a new
-    /// <typeparamref name="TConfig"/>, and every result passes through <see cref="OnLoaded"/>.
+    /// <typeparamref name="TConfig"/>, and every result passes through <see cref="OnLoaded"/>. A
+    /// single action that can't be read (an unregistered kind, a bad value) doesn't make the file
+    /// corrupt: it loads as an <see cref="UnrecognizedEventAction"/>, which is saved back unchanged.
     /// </summary>
     public TConfig Load()
     {
