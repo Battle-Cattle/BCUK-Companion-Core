@@ -36,4 +36,11 @@ public sealed class Reward
 
     [JsonPropertyName("isUserInputRequired")]
     public bool IsUserInputRequired { get; set; }
+
+    /// <summary>
+    /// Whether the reward requires companion confirmation: its redemptions arrive with
+    /// <see cref="RedemptionEvent.AckRequired"/> set, and are refunded unless acknowledged.
+    /// </summary>
+    [JsonPropertyName("companionConfirmationRequired")]
+    public bool CompanionConfirmationRequired { get; set; }
 }

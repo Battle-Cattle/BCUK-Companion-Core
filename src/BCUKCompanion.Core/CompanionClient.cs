@@ -144,6 +144,27 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>
+    /// Reports whether this app ran the actions for a <see cref="RedemptionEvent"/> sent with
+    /// <see cref="RedemptionEvent.AckRequired"/>, via POST /api/companion/rewards/ack. Success
+    /// completes the redemption; a failure (or no acknowledgement within the bot's timeout)
+    /// cancels it and refunds the viewer.
+    /// </summary>
+    /// <param name="redemptionId">The event's <see cref="RedemptionEvent.Id"/>.</param>
+    /// <param name="ok">Whether every action succeeded.</param>
+    /// <param name="error">Why not, when <paramref name="ok"/> is false.</param>
+    /// <returns>True if the acknowledgement resolved the redemption; false if the bot had already resolved it (e.g. timed out).</returns>
+    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
+    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
+    /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
+    public async Task<bool> AckRedemptionAsync(string redemptionId, bool ok, string? error = null, CancellationToken cancellationToken = default)
+    {
+        var body = JsonSerializer.Serialize(new { eventId = redemptionId, ok, error });
+        AckResponse parsed = await SendAsync<AckResponse>(
+            HttpMethod.Post, "/api/companion/rewards/ack", body, "Acknowledging redemption", cancellationToken).ConfigureAwait(false);
+        return parsed.Resolved;
+    }
+
+    /// <summary>
     /// Sends an authenticated GET to a companion API path and deserializes the response body as
     /// <typeparamref name="TResponse"/>. Shared by every simple request/response companion
     /// endpoint (as opposed to <see cref="Events"/>, which is long-lived/streaming). Every
