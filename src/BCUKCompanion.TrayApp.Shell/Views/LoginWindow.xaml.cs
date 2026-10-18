@@ -54,7 +54,7 @@ public partial class LoginWindow : Window
             return;
         }
 
-        ServerStatusText.Text = "Server updated. No connection has been made yet.";
+        ServerStatusText.Text = "Server updated. No connection has been made yet — log in to this server.";
     }
 
     private async void LoginWithBrowserButton_Click(object sender, RoutedEventArgs e)

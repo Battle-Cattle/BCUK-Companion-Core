@@ -175,7 +175,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// <summary>
     /// Re-points the companion client at the new bot host without making any
     /// network call — login (and any resulting connection) only happens if the
-    /// user subsequently clicks Login.
+    /// user subsequently clicks Login. The saved token was issued by the old bot, so a
+    /// different server (scheme, host or port) discards it rather than ever sending it to the
+    /// new one; a change that keeps the same server (e.g. only a path) stays logged in.
     /// </summary>
     private void ApplyBotHostChange(string newBotHost)
     {
@@ -184,22 +186,30 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             return;
         }
 
-        bool wasLoggedIn = _companionClient.IsLoggedIn;
+        var newHost = new Uri(newBotHost);
+        bool sameServer = AppSettings.ActivityKey(newHost) == AppSettings.ActivityKey(_botHost);
+        bool keepListening = sameServer && _companionClient.IsLoggedIn;
 
         _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
         _companionClient.Events.ActivityReceived -= OnActivityReceived;
         _companionClient.Events.AdvancedCommandReceived -= OnAdvancedCommandReceived;
         _companionClient.Events.ConnectionStateChanged -= OnConnectionStateChanged;
         _companionClient.ListenLoopFaulted -= OnListenLoopFaulted;
+        if (!sameServer)
+        {
+            _companionClient.Logout();
+            _isConnected = false;
+            _trayIcon.SetStatus(_options.DisplayName, CompanionConnectionState.Disconnected.ToString());
+        }
         _companionClient.Dispose();
 
-        _botHost = new Uri(newBotHost);
+        _botHost = newHost;
         _companionClient = CreateCompanionClient(_botHost);
         _loginWindow?.UpdateCompanionClient(_companionClient, newBotHost);
         _settingsWindow?.UpdateCompanionClient(_companionClient);
         _settingsWindow?.RefreshBotHost(newBotHost);
 
-        if (wasLoggedIn)
+        if (keepListening)
         {
             _companionClient.StartListening();
         }
