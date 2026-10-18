@@ -75,6 +75,12 @@ public static class LegacyInstallCleanup
             }
 
             string dir = locale is null ? installDir : Path.Combine(installDir, locale);
+            if (locale is not null && IsReparsePoint(dir))
+            {
+                // A junction could lead outside the install folder; leave what it points at alone.
+                continue;
+            }
+
             files.Add(Path.Combine(dir, fileName));
             if (locale is null && fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
             {
@@ -88,20 +94,28 @@ public static class LegacyInstallCleanup
 
     // Each "runtime"/"native" entry is a file in the install folder and each "resources" entry a
     // file in its locale's subfolder; package paths such as lib/net10.0/Foo.dll are flattened on
-    // publish, so only the file name is kept. Names that could point outside the folder are
-    // skipped. Null if the file is missing or can't be parsed.
+    // publish, so only the file name is kept. Only the target the old build ran with (its
+    // runtimeTarget) is read, and paths that are rooted or contain "." or ".." are skipped. Null
+    // if the file is missing, can't be parsed or has no such target.
     private static List<(string? Locale, string FileName)>? ReadDepsEntries(string depsFile)
     {
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllBytes(depsFile));
-            if (!doc.RootElement.TryGetProperty("targets", out var targets) || targets.ValueKind != JsonValueKind.Object)
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("runtimeTarget", out var runtimeTarget)
+                || runtimeTarget.ValueKind != JsonValueKind.Object
+                || !runtimeTarget.TryGetProperty("name", out var targetName)
+                || targetName.ValueKind != JsonValueKind.String
+                || !root.TryGetProperty("targets", out var targets)
+                || targets.ValueKind != JsonValueKind.Object
+                || !targets.TryGetProperty(targetName.GetString()!, out var target))
             {
                 return null;
             }
 
-            return ObjectProperties(targets)
-                .SelectMany(target => ObjectProperties(target.Value))
+            return ObjectProperties(target)
                 .SelectMany(library => ReadLibraryEntries(library.Value))
                 .ToList();
         }
@@ -124,7 +138,7 @@ public static class LegacyInstallCleanup
             {
                 string? locale = kind == "resources" ? ReadLocale(asset.Value) : null;
                 string fileName = asset.Name[(asset.Name.LastIndexOfAny(['/', '\\']) + 1)..];
-                if ((kind != "resources" || locale is not null) && IsPlainName(fileName))
+                if ((kind != "resources" || locale is not null) && IsSafeAssetPath(asset.Name) && IsPlainName(fileName))
                 {
                     yield return (locale, fileName);
                 }
@@ -145,6 +159,22 @@ public static class LegacyInstallCleanup
         element.ValueKind == JsonValueKind.Object
             ? element.EnumerateObject().Where(property => property.Value.ValueKind == JsonValueKind.Object)
             : [];
+
+    private static bool IsSafeAssetPath(string path) =>
+        !Path.IsPathRooted(path)
+        && path.Split('/', '\\').All(segment => segment is not "." and not "..");
+
+    private static bool IsReparsePoint(string dir)
+    {
+        try
+        {
+            return Directory.Exists(dir) && new DirectoryInfo(dir).Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
 
     private static bool IsPlainName(string? name) =>
         !string.IsNullOrWhiteSpace(name)

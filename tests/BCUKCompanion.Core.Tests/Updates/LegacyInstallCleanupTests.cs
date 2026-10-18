@@ -10,7 +10,9 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         {
           "runtimeTarget": { "name": ".NETCoreApp,Version=v10.0/win-x64" },
           "targets": {
-            ".NETCoreApp,Version=v10.0": {},
+            ".NETCoreApp,Version=v10.0": {
+              "Inactive/1.0.0": { "runtime": { "user-notes.txt": {} } }
+            },
             ".NETCoreApp,Version=v10.0/win-x64": {
               "MyApp/1.0.0": {
                 "dependencies": { "BCUKCompanion.Core": "0.13.0" },
@@ -32,7 +34,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
                 "runtime": { "lib/net10.0/BCUKCompanion.Core.dll": {} }
               },
               "Evil/1.0.0": {
-                "runtime": { "../outside.dll": {}, "MyApp.exe": {}, "appsettings.json": {} },
+                "runtime": { "../outside.dll": {}, "./dot.dll": {}, "/rooted.dll": {}, "MyApp.exe": {}, "appsettings.json": {} },
                 "resources": { "lib/x.resources.dll": { "locale": ".." } }
               }
             }
@@ -58,11 +60,18 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         Touch("user-notes.txt");
         Touch("cs", "user-file.txt");
         Touch(Path.Combine("..", "outside.dll"));
+        Touch("outside.dll");
+        Touch("dot.dll");
+        Touch("rooted.dll");
 
         Assert.True(LegacyInstallCleanup.Run(installDir, "MyApp"));
 
         Assert.Equal(
-            new[] { "MyApp.exe", "appsettings.json", Path.Combine("cs", "user-file.txt"), "user-notes.txt" }.Order(),
+            new[]
+            {
+                "MyApp.exe", "appsettings.json", Path.Combine("cs", "user-file.txt"), "user-notes.txt",
+                "outside.dll", "dot.dll", "rooted.dll",
+            }.Order(),
             Directory.EnumerateFiles(installDir, "*", SearchOption.AllDirectories)
                 .Select(f => Path.GetRelativePath(installDir, f)).Order());
         Assert.False(Directory.Exists(Path.Combine(installDir, "zh-Hans")));
@@ -78,6 +87,41 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         Assert.True(LegacyInstallCleanup.Run(installDir, "MyApp"));
 
         Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+    }
+
+    [Fact]
+    public void Run_WithoutTheRuntimeTarget_KeepsEverything()
+    {
+        Touch("coreclr.dll");
+        File.WriteAllText(
+            Path.Combine(installDir, "MyApp.deps.json"),
+            DepsJson.Replace("\"name\": \".NETCoreApp,Version=v10.0/win-x64\"", "\"name\": \"missing\""));
+
+        Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
+
+        Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+        Assert.True(File.Exists(Path.Combine(installDir, "MyApp.deps.json")));
+    }
+
+    [SkippableFact]
+    public void Run_DoesNotFollowALocaleJunction()
+    {
+        string outsideLocale = Path.Combine(root, "elsewhere");
+        Directory.CreateDirectory(outsideLocale);
+        File.WriteAllText(Path.Combine(outsideLocale, "PresentationCore.resources.dll"), string.Empty);
+        File.WriteAllText(Path.Combine(installDir, "MyApp.deps.json"), DepsJson);
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(installDir, "cs"), outsideLocale);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Skip.If(true, "Creating a directory link needs extra rights on this machine.");
+        }
+
+        Assert.True(LegacyInstallCleanup.Run(installDir, "MyApp"));
+
+        Assert.True(File.Exists(Path.Combine(outsideLocale, "PresentationCore.resources.dll")));
     }
 
     [Fact]
