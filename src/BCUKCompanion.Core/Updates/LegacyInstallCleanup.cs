@@ -92,7 +92,6 @@ public static class LegacyInstallCleanup
     // skipped. Null if the file is missing or can't be parsed.
     private static List<(string? Locale, string FileName)>? ReadDepsEntries(string depsFile)
     {
-        var entries = new List<(string?, string)>();
         try
         {
             using var doc = JsonDocument.Parse(File.ReadAllBytes(depsFile));
@@ -101,63 +100,51 @@ public static class LegacyInstallCleanup
                 return null;
             }
 
-            foreach (var target in targets.EnumerateObject())
-            {
-                if (target.Value.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                foreach (var library in target.Value.EnumerateObject())
-                {
-                    if (library.Value.ValueKind != JsonValueKind.Object)
-                    {
-                        continue;
-                    }
-
-                    foreach (string kind in new[] { "runtime", "native", "resources" })
-                    {
-                        if (!library.Value.TryGetProperty(kind, out var assets) || assets.ValueKind != JsonValueKind.Object)
-                        {
-                            continue;
-                        }
-
-                        foreach (var asset in assets.EnumerateObject())
-                        {
-                            string? locale = null;
-                            if (kind == "resources")
-                            {
-                                if (asset.Value.ValueKind != JsonValueKind.Object
-                                    || !asset.Value.TryGetProperty("locale", out var localeElement)
-                                    || localeElement.ValueKind != JsonValueKind.String)
-                                {
-                                    continue;
-                                }
-
-                                locale = localeElement.GetString();
-                                if (!IsPlainName(locale))
-                                {
-                                    continue;
-                                }
-                            }
-
-                            string fileName = asset.Name[(asset.Name.LastIndexOfAny(['/', '\\']) + 1)..];
-                            if (IsPlainName(fileName))
-                            {
-                                entries.Add((locale, fileName));
-                            }
-                        }
-                    }
-                }
-            }
+            return ObjectProperties(targets)
+                .SelectMany(target => ObjectProperties(target.Value))
+                .SelectMany(library => ReadLibraryEntries(library.Value))
+                .ToList();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return null;
         }
-
-        return entries;
     }
+
+    private static IEnumerable<(string? Locale, string FileName)> ReadLibraryEntries(JsonElement library)
+    {
+        foreach (string kind in new[] { "runtime", "native", "resources" })
+        {
+            if (!library.TryGetProperty(kind, out var assets) || assets.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            foreach (var asset in assets.EnumerateObject())
+            {
+                string? locale = kind == "resources" ? ReadLocale(asset.Value) : null;
+                string fileName = asset.Name[(asset.Name.LastIndexOfAny(['/', '\\']) + 1)..];
+                if ((kind != "resources" || locale is not null) && IsPlainName(fileName))
+                {
+                    yield return (locale, fileName);
+                }
+            }
+        }
+    }
+
+    // A resource asset's locale folder, or null if it has none that is safe to use.
+    private static string? ReadLocale(JsonElement asset) =>
+        asset.ValueKind == JsonValueKind.Object
+        && asset.TryGetProperty("locale", out var locale)
+        && locale.ValueKind == JsonValueKind.String
+        && IsPlainName(locale.GetString())
+            ? locale.GetString()
+            : null;
+
+    private static IEnumerable<JsonProperty> ObjectProperties(JsonElement element) =>
+        element.ValueKind == JsonValueKind.Object
+            ? element.EnumerateObject().Where(property => property.Value.ValueKind == JsonValueKind.Object)
+            : [];
 
     private static bool IsPlainName(string? name) =>
         !string.IsNullOrWhiteSpace(name)
