@@ -234,8 +234,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         CompanionClient client = _companionClient;
         _ = Dispatcher.InvokeAsync(async () =>
         {
-            string who = string.IsNullOrEmpty(redemption.UserName) ? redemption.UserLogin : redemption.UserName;
-            _trayIcon.ShowBalloon(redemption.RewardTitle, $"Redeemed by {who}");
+            _trayIcon.ShowBalloon(redemption.RewardTitle, $"Redeemed by {redemption.DisplayName}");
 
             (bool ok, string? error) = await HandleBotEventAsync(new BotEventArgs(
                 EventActionDispatcher.RedemptionEventName,
@@ -249,19 +248,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                     ["userInput"] = redemption.UserInput,
                     ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
                 })).ConfigureAwait(true);
-            if (!redemption.AckRequired || string.IsNullOrEmpty(redemption.Id))
+            if (redemption.NeedsAck)
             {
-                return;
-            }
-
-            try
-            {
-                await client.AckRedemptionAsync(redemption.Id, ok, error).ConfigureAwait(true);
-            }
-            catch (Exception)
-            {
-                // Couldn't reach the bot: it refunds the viewer once its acknowledgement timeout
-                // passes, which is the right outcome when we can't say the actions ran.
+                await TrySendAckAsync(() => client.AckRedemptionAsync(redemption.Id, ok, error)).ConfigureAwait(true);
             }
         });
     }
@@ -342,21 +331,28 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             _trayIcon.ShowBalloon(command.CommandName, text);
 
             (bool ok, string? error) = await HandleBotEventAsync(BuildCommandEventArgs(command)).ConfigureAwait(true);
-            if (!command.AckRequired)
+            if (command.AckRequired)
             {
-                return;
-            }
-
-            try
-            {
-                await client.AckAdvancedCommandAsync(command.Id, ok, error).ConfigureAwait(true);
-            }
-            catch (Exception)
-            {
-                // Couldn't reach the bot: it refunds the viewer once its acknowledgement timeout
-                // passes, which is the right outcome when we can't say the command ran.
+                await TrySendAckAsync(() => client.AckAdvancedCommandAsync(command.Id, ok, error)).ConfigureAwait(true);
             }
         });
+    }
+
+    /// <summary>
+    /// Sends an acknowledgement to the bot, ignoring a failure to reach it: the bot then refunds
+    /// the viewer once its acknowledgement timeout passes, which is the right outcome when we
+    /// can't say the actions ran.
+    /// </summary>
+    private static async Task TrySendAckAsync(Func<Task<bool>> sendAck)
+    {
+        try
+        {
+            await sendAck().ConfigureAwait(true);
+        }
+        catch (Exception)
+        {
+            // See the summary: the bot's timeout covers an acknowledgement that never arrives.
+        }
     }
 
     /// <summary>

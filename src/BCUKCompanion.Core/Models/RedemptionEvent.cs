@@ -45,4 +45,15 @@ public sealed class RedemptionEvent
 
     [JsonPropertyName("redeemedAt")]
     public DateTimeOffset RedeemedAt { get; set; }
+
+    /// <summary>The viewer's display name, falling back to their login when it's empty.</summary>
+    [JsonIgnore]
+    public string DisplayName => string.IsNullOrEmpty(UserName) ? UserLogin : UserName;
+
+    /// <summary>
+    /// Whether this app must acknowledge the redemption: the bot asked for it, and sent an
+    /// <see cref="Id"/> to acknowledge it by.
+    /// </summary>
+    [JsonIgnore]
+    public bool NeedsAck => AckRequired && !string.IsNullOrEmpty(Id);
 }

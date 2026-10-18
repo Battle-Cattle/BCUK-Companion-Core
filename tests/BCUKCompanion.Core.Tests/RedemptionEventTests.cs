@@ -59,4 +59,21 @@ public class RedemptionEventTests
         Assert.Equal(string.Empty, redemption!.Id);
         Assert.False(redemption.AckRequired);
     }
+
+    [Theory]
+    [InlineData(true, "red-1", true)]
+    [InlineData(true, "", false)]
+    [InlineData(false, "red-1", false)]
+    public void NeedsAckOnlyWhenRequiredAndIdentified(bool ackRequired, string id, bool expected)
+    {
+        var redemption = new RedemptionEvent { AckRequired = ackRequired, Id = id };
+        Assert.Equal(expected, redemption.NeedsAck);
+    }
+
+    [Fact]
+    public void DisplayNameFallsBackToTheLogin()
+    {
+        Assert.Equal("Viewer", new RedemptionEvent { UserName = "Viewer", UserLogin = "viewer" }.DisplayName);
+        Assert.Equal("viewer", new RedemptionEvent { UserName = "", UserLogin = "viewer" }.DisplayName);
+    }
 }
