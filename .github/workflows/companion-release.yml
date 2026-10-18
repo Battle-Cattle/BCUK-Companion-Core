@@ -107,7 +107,11 @@ jobs:
           dotnet-version: "10.0.x"
 
       # Self-contained so end users don't need the .NET runtime installed. Publish does its
-      # own restore so the runtime packs match the self-contained setting.
+      # own restore so the runtime packs match the self-contained setting. Single-file (with
+      # WPF's native DLLs bundled too), English-only framework resources and no .pdb files, so
+      # the zip holds just the .exe and appsettings.json rather than hundreds of runtime files.
+      # Not compressed in the .exe: the zip already compresses the download, and an uncompressed
+      # bundle starts faster. Trimming isn't supported for WPF/WinForms apps.
       - name: Publish
         if: env.SKIP != 'true'
         shell: pwsh
@@ -120,6 +124,10 @@ jobs:
           --runtime win-x64
           --self-contained true
           --output publish
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:SatelliteResourceLanguages=en
+          -p:DebugType=none
           "-p:Version=$env:VERSION"
 
       # The .sha256 file is in sha256sum format; the updater verifies the zip against it.

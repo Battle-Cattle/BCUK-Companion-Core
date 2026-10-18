@@ -5,6 +5,7 @@ using BCUKCompanion.Core.Actions;
 using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
 using BCUKCompanion.Core.Tokens;
+using BCUKCompanion.Core.Updates;
 using BCUKCompanion.TrayApp.Services;
 using BCUKCompanion.TrayApp.Updates;
 using BCUKCompanion.TrayApp.Views;
@@ -35,8 +36,30 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
     public static void Run(CompanionTrayAppOptions? options = null)
     {
+        RemoveLegacyInstallFiles();
         var app = new CompanionTrayApplication(options ?? new CompanionTrayAppOptions());
         ((System.Windows.Application)app).Run();
+    }
+
+    // Releases are single-file builds, and the updater never deletes anything, so an install
+    // updated from an older multi-file release still holds that build's loose runtime files. Runs
+    // before WPF starts so none of them are loaded yet. Only a single-file build (no assembly
+    // Location) may do this: a multi-file build, e.g. a developer's, still needs those files.
+    private static void RemoveLegacyInstallFiles()
+    {
+        if (!string.IsNullOrEmpty(typeof(CompanionTrayApplication).Assembly.Location) || Environment.ProcessPath is not { } exePath)
+        {
+            return;
+        }
+
+        try
+        {
+            LegacyInstallCleanup.Run(AppContext.BaseDirectory, Path.GetFileNameWithoutExtension(exePath));
+        }
+        catch (Exception)
+        {
+            // Best-effort clean-up; it must never stop the app starting. Retried on the next launch.
+        }
     }
 
     protected override void OnStartup(StartupEventArgs e)

@@ -90,6 +90,12 @@ Release. Its output (tag, `<app>-<tag>-win-x64.zip`, `<zip>.sha256`) is the
 contract `GitHubReleaseUpdateChecker` and the Shell's updater rely on —
 change both together.
 
+The zip is a single-file, self-contained build (just the `.exe` and
+`appsettings.json`). The updater only ever copies files over the install
+folder, so on launch a single-file build removes whatever an older
+multi-file release left behind, using that build's `<app>.deps.json` as the
+list (`LegacyInstallCleanup`).
+
 ## Publishing packages
 
 `BCUKCompanion.Core` and `BCUKCompanion.TrayApp.Shell` are packed and
