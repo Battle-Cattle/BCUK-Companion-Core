@@ -73,7 +73,8 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     // recovery. If the restore fails too, the folder may hold a mix of both builds, so the app is
     // not relaunched; restore-failed.log records why. If the app never exits, nothing is touched.
     // Files the new build no longer ships are left in place rather than mirroring, so nothing a
-    // user dropped into the folder gets deleted.
+    // user dropped into the folder gets deleted; the leftovers of an older multi-file build are
+    // removed by the new build itself on launch (LegacyInstallCleanup).
     private const string ApplyUpdateScript = """
         param(
             [int]$ProcessId,
