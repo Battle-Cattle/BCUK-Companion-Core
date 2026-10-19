@@ -179,22 +179,48 @@ public sealed class GitHubReleaseUpdateCheckerTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAsync_NoChecksum_WritesFile()
+    public async Task DownloadAsync_NoChecksum_RefusesWithoutDownloading()
     {
         var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, "zip contents");
         var update = new AvailableUpdate(new Version(1, 1, 0), "v1.1.0",
             new Uri("https://example.test/a.zip"), new Uri("https://example.test/"));
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => CreateChecker(handler).DownloadAsync(update, tempFile));
+
+        Assert.Contains("no checksum", ex.Message);
+        Assert.Null(handler.LastRequest);
+        Assert.False(File.Exists(tempFile));
+    }
+
+    [Fact]
+    public async Task DownloadAsync_MatchingChecksum_WritesFile()
+    {
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("zip contents")));
+        var handler = new RoutingHandler(new()
+        {
+            ["/a.zip"] = "zip contents",
+            ["/a.zip.sha256"] = $"{hash}  a.zip",
+        });
+        var update = new AvailableUpdate(new Version(1, 1, 0), "v1.1.0",
+            new Uri("https://example.test/a.zip"), new Uri("https://example.test/"), new Uri("https://example.test/a.zip.sha256"));
 
         await CreateChecker(handler).DownloadAsync(update, tempFile);
 
         Assert.Equal("zip contents", File.ReadAllText(tempFile));
     }
 
+    /// <summary>Serves a fixed body per request path.</summary>
+    private sealed class RoutingHandler(Dictionary<string, string> bodies) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(bodies[request.RequestUri!.AbsolutePath]) });
+    }
+
     [Fact]
     public async Task DownloadAsync_ConnectionDropsMidDownload_DeletesPartialFileAndThrows()
     {
         var update = new AvailableUpdate(new Version(1, 1, 0), "v1.1.0",
-            new Uri("https://example.test/a.zip"), new Uri("https://example.test/"));
+            new Uri("https://example.test/a.zip"), new Uri("https://example.test/"), new Uri("https://example.test/a.zip.sha256"));
 
         await Assert.ThrowsAsync<HttpRequestException>(() => CreateChecker(new DroppingHandler()).DownloadAsync(update, tempFile));
         Assert.False(File.Exists(tempFile));
