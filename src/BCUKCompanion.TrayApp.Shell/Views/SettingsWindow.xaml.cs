@@ -54,16 +54,29 @@ public partial class SettingsWindow : Window
         StatusText.Text = "Saved.";
     }
 
-    /// <summary>Logs out, revoking the token on the bot where it can be reached, and returns to the Login window.</summary>
+    /// <summary>
+    /// Logs out, revoking the token on the bot where it can be reached, and returns to the Login
+    /// window. If the bot couldn't revoke it, Settings stays open to say so.
+    /// </summary>
     private async void LogOutButton_Click(object sender, RoutedEventArgs e)
     {
         IsEnabled = false;
         StatusText.Text = "Logging out...";
 
         // Logs out locally first, then revokes the token on the bot (best-effort, a few seconds at most).
-        await _companionClient.LogoutAsync().ConfigureAwait(true);
+        bool revoked = await _companionClient.LogoutAsync().ConfigureAwait(true);
         LoggedOut?.Invoke(this, EventArgs.Empty);
-        Close();
+        if (revoked)
+        {
+            Close();
+            return;
+        }
+
+        // Logged out on this PC either way, but a copy of the token may still work on the bot.
+        IsEnabled = true;
+        LogOutButton.IsEnabled = false;
+        StatusText.Text = "Logged out on this PC, but the bot couldn't be reached to revoke the token, so a copy of it "
+            + "may still work. Logging in again replaces it, or revoke it from the bot's dashboard.";
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
