@@ -47,11 +47,13 @@ internal sealed class TrayIconController : IDisposable
         _notifyIcon.DoubleClick += (_, _) => RunSafely("Settings", () => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
     }
 
+    /// <summary>Adds a menu item whose click runs <paramref name="onClick"/> through <see cref="RunSafely"/>.</summary>
     private void AddItem(ContextMenuStrip menu, string label, Action onClick) =>
         menu.Items.Add(label, null, (_, _) => RunSafely(label, onClick));
 
     // A menu click runs on the WinForms message loop, where an escaping exception would bring up
     // WinForms' crash dialog: report it through MenuItemFailed instead and keep the tray running.
+    /// <summary>Runs a menu item's action, raising <see cref="MenuItemFailed"/> instead of letting an exception escape.</summary>
     private void RunSafely(string label, Action action)
     {
         try

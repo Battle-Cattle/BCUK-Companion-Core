@@ -74,6 +74,7 @@ public sealed class LoopbackOAuthClient
         }
     }
 
+    /// <summary>The bot's companion login URL, carrying the loopback redirect, the OAuth <c>state</c> and the PKCE S256 challenge.</summary>
     internal Uri BuildLoginUrl(Uri redirectUri, string state, string codeChallenge)
     {
         string query = $"redirect_uri={Uri.EscapeDataString(redirectUri.ToString())}&state={Uri.EscapeDataString(state)}"
@@ -85,6 +86,7 @@ public sealed class LoopbackOAuthClient
     internal static string CodeChallenge(string codeVerifier) =>
         Base64Url(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(codeVerifier)));
 
+    /// <summary>Base64url encoding without padding (RFC 4648 §5), as PKCE and the OAuth state use.</summary>
     private static string Base64Url(ReadOnlySpan<byte> bytes) =>
         Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
 
@@ -99,6 +101,7 @@ public sealed class LoopbackOAuthClient
         return Base64Url(bytes);
     }
 
+    /// <summary>Exchanges the one-time <paramref name="code"/> and its PKCE <paramref name="codeVerifier"/> for the bearer token.</summary>
     private async Task<string> ExchangeCodeForTokenAsync(string code, string codeVerifier, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/oauth/token");

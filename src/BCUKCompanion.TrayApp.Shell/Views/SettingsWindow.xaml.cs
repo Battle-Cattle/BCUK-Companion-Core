@@ -35,6 +35,7 @@ public partial class SettingsWindow : Window
         _companionClient = companionClient;
     }
 
+    /// <summary>Saves the settings and the run-at-startup choice, showing any failure in the status line.</summary>
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         _settings.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
@@ -53,6 +54,7 @@ public partial class SettingsWindow : Window
         StatusText.Text = "Saved.";
     }
 
+    /// <summary>Logs out, revoking the token on the bot where it can be reached, and returns to the Login window.</summary>
     private async void LogOutButton_Click(object sender, RoutedEventArgs e)
     {
         IsEnabled = false;

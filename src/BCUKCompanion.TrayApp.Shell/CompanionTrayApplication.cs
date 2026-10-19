@@ -62,6 +62,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
     }
 
+    /// <summary>Sets up the single-instance guard, settings, companion client, tray icon and updater, then starts listening or shows the Login window.</summary>
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -140,8 +141,16 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
     }
 
+    /// <summary>Reports an exception that escaped a UI handler as a balloon and keeps the app running, once the tray icon exists.</summary>
     private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
+        // Before the tray icon exists (a startup failure) there is nowhere to report the error,
+        // and swallowing it would leave an invisible process holding the single-instance mutex.
+        if (_trayIcon is null)
+        {
+            return;
+        }
+
         e.Handled = true;
         ReportUnhandledError(e.Exception);
     }
@@ -277,12 +286,15 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
     // The client is read when the event arrives: a bot-host change can replace _companionClient
     // while the actions run, and the acknowledgement must go to the host the event came from.
+    /// <summary>Hands a redemption to the bot-event handler, with the client it arrived on.</summary>
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption) =>
         _botEvents.OnRedemption(_companionClient, redemption);
 
+    /// <summary>Hands a follow/sub/raid/... activity to the bot-event handler.</summary>
     private void OnActivityReceived(object? sender, CompanionActivityEvent activity) =>
         _botEvents.OnActivity(activity);
 
+    /// <summary>Hands an advanced command to the bot-event handler, with the client it arrived on.</summary>
     private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command) =>
         _botEvents.OnAdvancedCommand(_companionClient, command);
 
@@ -309,6 +321,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     }
 
 
+    /// <summary>Shows the connection state on the tray icon; a rejected token is discarded and the Login window opened.</summary>
     private void OnConnectionStateChanged(object? sender, CompanionConnectionState state)
     {
         Dispatcher.Invoke(() =>

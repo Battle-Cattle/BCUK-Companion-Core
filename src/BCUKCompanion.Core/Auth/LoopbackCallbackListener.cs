@@ -34,6 +34,7 @@ internal static class LoopbackCallbackListener
         throw new CompanionAuthException("Could not bind a local port for the companion login callback.");
     }
 
+    /// <summary>A loopback port that was free a moment ago (another process can still take it before it is bound).</summary>
     private static int GetFreeLoopbackPort()
     {
         var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -70,8 +71,16 @@ internal static class LoopbackCallbackListener
                 return (context, code);
             }
 
-            RespondHtml(context, 400, "<html><body>Login failed: invalid response from server.</body></html>");
-            context.Response.OutputStream.Close();
+            try
+            {
+                RespondHtml(context, 400, "<html><body>Login failed: invalid response from server.</body></html>");
+                context.Response.OutputStream.Close();
+            }
+            catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
+            {
+                // The stray client already went away; keep waiting for the real redirect.
+                context.Response.Abort();
+            }
         }
     }
 
@@ -112,6 +121,7 @@ internal static class LoopbackCallbackListener
         return code.Length > 0 && context.Request.QueryString["state"] == expectedState;
     }
 
+    /// <summary>Writes <paramref name="html"/> as the response to the browser with <paramref name="statusCode"/>.</summary>
     internal static void RespondHtml(HttpListenerContext context, int statusCode, string html)
     {
         byte[] buffer = System.Text.Encoding.UTF8.GetBytes(html);

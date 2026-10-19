@@ -41,6 +41,7 @@ public sealed class DpapiFileTokenStore : ITokenStore
         }
     }
 
+    /// <summary>Encrypts <paramref name="token"/> for the current Windows user and replaces the saved token file with it.</summary>
     public void Save(string token)
     {
         string? directory = Path.GetDirectoryName(_filePath);
@@ -54,10 +55,14 @@ public sealed class DpapiFileTokenStore : ITokenStore
         {
             byte[] encrypted = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.CurrentUser);
 
-            // Written to a temp file and swapped in, so a crash or power loss mid-write can't leave
-            // a truncated blob that silently logs the user out.
+            // Written to a temp file, flushed to disk, then swapped in, so a crash or power loss
+            // mid-write can't leave a truncated blob that silently logs the user out.
             string tempPath = _filePath + ".tmp";
-            File.WriteAllBytes(tempPath, encrypted);
+            using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(encrypted, 0, encrypted.Length);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(tempPath, _filePath, overwrite: true);
         }
         finally

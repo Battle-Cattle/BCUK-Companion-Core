@@ -16,6 +16,7 @@ internal sealed class BotEventHandler
     private readonly Dispatcher _dispatcher;
     private readonly Action<string, string> _showBalloon;
 
+    /// <summary>Creates the handler for a tray app with <paramref name="options"/>; balloons go through <paramref name="showBalloon"/>.</summary>
     public BotEventHandler(CompanionTrayAppOptions options, Dispatcher dispatcher, Action<string, string> showBalloon)
     {
         _options = options;
