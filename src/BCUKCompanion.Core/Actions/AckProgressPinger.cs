@@ -13,14 +13,17 @@ public static class AckProgressPinger
 
     /// <summary>
     /// Runs <paramref name="work"/>, sending <paramref name="ping"/> every <paramref name="interval"/>
-    /// until it finishes. A failed ping is ignored (an older bot without progress pings answers 404;
-    /// the next ping, or the acknowledgement, still goes out), and no ping is sent once the work is done.
+    /// until it finishes. Pinging stops early once the bot says it's no longer waiting for the event
+    /// (<paramref name="ping"/> returns false: it already timed out or refunded, or the event hit the
+    /// bot's cap) or answers 404 (a bot that predates progress pings, or an event it doesn't know).
+    /// Any other failed ping is ignored, so the next one still goes out, and no ping is sent once the
+    /// work is done.
     /// </summary>
     /// <param name="work">The event's actions; its result is returned.</param>
-    /// <param name="ping">Sends one progress ping; canceled once the work finishes.</param>
+    /// <param name="ping">Sends one progress ping and returns whether the bot extended its timeout; canceled once the work finishes.</param>
     /// <param name="interval">Time between pings; <see cref="DefaultInterval"/> when null.</param>
     /// <returns>Whatever <paramref name="work"/> returns.</returns>
-    public static async Task<T> RunWithProgressAsync<T>(Func<Task<T>> work, Func<CancellationToken, Task> ping, TimeSpan? interval = null)
+    public static async Task<T> RunWithProgressAsync<T>(Func<Task<T>> work, Func<CancellationToken, Task<bool>> ping, TimeSpan? interval = null)
     {
         using var done = new CancellationTokenSource();
         Task pinging = PingUntilCanceledAsync(ping, interval ?? DefaultInterval, done.Token);
@@ -35,17 +38,27 @@ public static class AckProgressPinger
         }
     }
 
-    /// <summary>Sends <paramref name="ping"/> every <paramref name="interval"/>, ignoring failures, until <paramref name="cancellationToken"/> is canceled.</summary>
-    private static async Task PingUntilCanceledAsync(Func<CancellationToken, Task> ping, TimeSpan interval, CancellationToken cancellationToken)
+    /// <summary>
+    /// Sends <paramref name="ping"/> every <paramref name="interval"/> until <paramref name="cancellationToken"/>
+    /// is canceled, the bot stops extending its timeout, or it answers 404; other failures are ignored.
+    /// </summary>
+    private static async Task PingUntilCanceledAsync(Func<CancellationToken, Task<bool>> ping, TimeSpan interval, CancellationToken cancellationToken)
     {
         while (true)
         {
             try
             {
                 await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
-                await ping(cancellationToken).ConfigureAwait(false);
+                if (!await ping(cancellationToken).ConfigureAwait(false))
+                {
+                    return;
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (CompanionApiException ex) when (ex.StatusCode == 404)
             {
                 return;
             }
