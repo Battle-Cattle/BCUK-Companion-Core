@@ -30,6 +30,10 @@ public sealed class CompanionClient : IDisposable
     private CancellationTokenSource? _eventLoopCts;
     private Task _eventLoopTask = Task.CompletedTask;
 
+    // The token the listen loop that's running right now connected with, or null between loops.
+    // Loops never overlap, so an event the stream raises comes from the loop using this token.
+    private string? _listeningToken;
+
     public CompanionEventStream Events { get; }
 
     public bool IsLoggedIn => _tokenStore.Load() is not null;
@@ -369,6 +373,33 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>
+    /// Discards the saved token after the bot rejected the one the listen loop connected with:
+    /// call it from a <see cref="CompanionEventStream.ConnectionStateChanged"/> handler for
+    /// <see cref="CompanionConnectionState.AuthenticationFailed"/>. Only that rejected token is
+    /// discarded (and listening stopped): if a newer one was saved meanwhile, e.g. the user logged
+    /// in again while the old loop was still connecting, it's kept and nothing is changed.
+    /// </summary>
+    /// <returns>True if the rejected token was discarded; false if a different token (or none) is saved now.</returns>
+    /// <exception cref="IOException">The token file couldn't be read or deleted.</exception>
+    /// <exception cref="UnauthorizedAccessException">The token file couldn't be read or deleted.</exception>
+    public bool DiscardRejectedToken()
+    {
+        string? rejected;
+        lock (_lifecycleLock)
+        {
+            rejected = _listeningToken;
+        }
+
+        if (rejected is null || _tokenStore.Load() != rejected)
+        {
+            return false;
+        }
+
+        Logout();
+        return true;
+    }
+
+    /// <summary>
     /// Logs out: discards the stored token, stops listening, then asks the bot to revoke it
     /// (POST /api/companion/token/revoke) so a copy of it stops working too. The local logout
     /// happens before this returns, so a token file that can't be read or deleted throws here
@@ -477,6 +508,11 @@ public sealed class CompanionClient : IDisposable
             // observe here -- we're only waiting for it to fully unwind.
         }
 
+        lock (_lifecycleLock)
+        {
+            _listeningToken = token;
+        }
+
         try
         {
             await (ListenLoopOverride ?? Events.RunAsync)(token, cts.Token).ConfigureAwait(false);
@@ -502,6 +538,9 @@ public sealed class CompanionClient : IDisposable
                 {
                     _eventLoopCts = null;
                 }
+
+                // The next loop only starts once this one has unwound, so this is still its token.
+                _listeningToken = null;
             }
 
             // Deferred until the loop has genuinely exited -- disposing eagerly in

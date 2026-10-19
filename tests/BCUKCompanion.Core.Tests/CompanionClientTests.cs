@@ -117,6 +117,57 @@ public class CompanionClientTests
     }
 
     [Fact]
+    public async Task DiscardRejectedTokenClearsTheTokenTheLoopWasUsing()
+    {
+        var tokenStore = new FakeTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("old");
+        var discarded = new TaskCompletionSource<bool>();
+        client.ListenLoopOverride = (_, _) =>
+        {
+            discarded.TrySetResult(client.DiscardRejectedToken());
+            return Task.CompletedTask;
+        };
+
+        client.StartListening();
+
+        Assert.True(await discarded.Task.WaitAsync(TestTimeout));
+        Assert.Null(tokenStore.Load());
+    }
+
+    [Fact]
+    public async Task DiscardRejectedTokenKeepsATokenSavedSinceTheLoopStarted()
+    {
+        var tokenStore = new FakeTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("old");
+        var discarded = new TaskCompletionSource<bool>();
+        client.ListenLoopOverride = (_, _) =>
+        {
+            // The user logged in again while this loop was still connecting with the old token.
+            tokenStore.Save("new");
+            discarded.TrySetResult(client.DiscardRejectedToken());
+            return Task.CompletedTask;
+        };
+
+        client.StartListening();
+
+        Assert.False(await discarded.Task.WaitAsync(TestTimeout));
+        Assert.Equal("new", tokenStore.Load());
+    }
+
+    [Fact]
+    public void DiscardRejectedTokenOutsideAListenLoopDoesNothing()
+    {
+        var tokenStore = new FakeTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("abc123");
+
+        Assert.False(client.DiscardRejectedToken());
+        Assert.Equal("abc123", tokenStore.Load());
+    }
+
+    [Fact]
     public void StartListeningWithoutTokenThrows()
     {
         var tokenStore = new FakeTokenStore();

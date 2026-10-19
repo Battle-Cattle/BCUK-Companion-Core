@@ -367,12 +367,17 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             if (state == CompanionConnectionState.AuthenticationFailed)
             {
                 // The bot rejected the token (revoked or replaced): discard it, so the next launch
-                // doesn't retry it and the Login window starts from a logged-out state. This runs on
-                // the listen loop's thread via Invoke, so a token file that can't be deleted is
-                // reported rather than thrown back into (and faulting) the loop.
+                // doesn't retry it and the Login window starts from a logged-out state. Only that
+                // token, though: one saved since (a new login while this loop was connecting) is
+                // kept, and then there's nothing to do. This runs on the listen loop's thread via
+                // Invoke, so a token file that can't be deleted is reported rather than thrown back
+                // into (and faulting) the loop.
                 try
                 {
-                    _companionClient.Logout();
+                    if (!_companionClient.DiscardRejectedToken())
+                    {
+                        return;
+                    }
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
