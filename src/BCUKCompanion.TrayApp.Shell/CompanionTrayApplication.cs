@@ -458,20 +458,32 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             return hostError is null ? AdvancedCommandAck.FromDispatchResult(hostResult) : (false, hostError);
         }
 
+        (bool Ok, string? Error) actionsAck;
         try
         {
             // Off the UI thread: building the dispatcher typically loads the saved config, and
             // the actions themselves do network/BLE I/O (and Delay actions wait).
             EventDispatchResult? result = await Task.Run(() => createDispatcher().DispatchAsync(botEvent)).ConfigureAwait(true);
-            var ack = AdvancedCommandAck.FromDispatchResult(result);
+            actionsAck = AdvancedCommandAck.FromDispatchResult(result);
             ReportFailedActions(result);
-            return ack;
         }
         catch (Exception ex)
         {
             _trayIcon.ShowBalloon("Action dispatch crashed", ex.Message);
-            return (false, ex.Message);
+            actionsAck = (false, ex.Message);
         }
+
+        // With both set, the host's own handler counts too: a host that throws, or reports a
+        // failed result, must not be acknowledged as a success just because the mapped actions ran.
+        if (_options.OnBotEventAsync is null)
+        {
+            return actionsAck;
+        }
+
+        (bool Ok, string? Error) hostAck = hostError is not null ? (false, hostError)
+            : hostResult is { ActionResults.Count: > 0 } ? AdvancedCommandAck.FromDispatchResult(hostResult)
+            : (true, null);
+        return AdvancedCommandAck.Combine(hostAck, actionsAck);
     }
 
     /// <summary>
