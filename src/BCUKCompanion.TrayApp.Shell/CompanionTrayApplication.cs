@@ -347,6 +347,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
                 {
+                    // Traced too, since the balloon is best-effort and may not show.
+                    System.Diagnostics.Trace.TraceError("Couldn't discard the rejected login: {0}", ex);
                     _companionClient.StopListening();
                     _trayIcon.ShowBalloon(_options.DisplayName, $"Couldn't discard the rejected login: {ex.Message}");
                 }
