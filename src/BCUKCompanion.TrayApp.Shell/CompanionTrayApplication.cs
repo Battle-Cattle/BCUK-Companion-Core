@@ -204,11 +204,12 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     }
 
     /// <summary>
-    /// Re-points the companion client at the new bot host without making any
-    /// network call — login (and any resulting connection) only happens if the
-    /// user subsequently clicks Login. The saved token was issued by the old bot, so a
-    /// different server (scheme, host or port) discards it rather than ever sending it to the
-    /// new one; a change that keeps the same server (e.g. only a path) stays logged in.
+    /// Re-points the companion client at the new bot host without contacting the new one —
+    /// login (and any resulting connection) only happens if the user subsequently clicks Login.
+    /// The saved token was issued by the old bot, so a different server (scheme, host or port)
+    /// discards it rather than ever sending it to the new one, and asks the old bot to revoke it
+    /// in the background so a copy of it stops working there too; a change that keeps the same
+    /// server (e.g. only a path) stays logged in.
     /// </summary>
     private void ApplyBotHostChange(string newBotHost)
     {
@@ -222,11 +223,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         bool keepListening = sameServer && _companionClient.IsLoggedIn;
 
         // First, so a token file that can't be deleted throws before anything is detached and
-        // leaves the app exactly as it was (still wired to the old client).
-        if (!sameServer)
-        {
-            _companionClient.Logout();
-        }
+        // leaves the app exactly as it was (still wired to the old client). LogoutAsync discards
+        // the token before it returns; only the revoke on the old bot is left running.
+        Task<LogoutResult>? oldServerRevoke = sameServer ? null : _companionClient.LogoutAsync();
 
         _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
         _companionClient.Events.ActivityReceived -= OnActivityReceived;
@@ -238,7 +237,15 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             _isConnected = false;
             _trayIcon.SetStatus(_options.DisplayName, CompanionConnectionState.Disconnected.ToString());
         }
-        _companionClient.Dispose();
+
+        if (oldServerRevoke is null)
+        {
+            _companionClient.Dispose();
+        }
+        else
+        {
+            _ = FinishOldServerLogoutAsync(_companionClient, oldServerRevoke);
+        }
 
         _botHost = newHost;
         _companionClient = CreateCompanionClient(_botHost);
@@ -249,6 +256,26 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         if (keepListening)
         {
             _companionClient.StartListening();
+        }
+    }
+
+    /// <summary>
+    /// Waits for the old bot's revoke after a server change (a few seconds at most), says so if it
+    /// wasn't confirmed, then disposes the old client, which owns the connection the revoke uses.
+    /// </summary>
+    private async Task FinishOldServerLogoutAsync(CompanionClient oldClient, Task<LogoutResult> revoke)
+    {
+        try
+        {
+            if (await revoke.ConfigureAwait(true) == LogoutResult.NotConfirmed)
+            {
+                _trayIcon.ShowBalloon(_options.DisplayName,
+                    "Switched server, but the old server didn't confirm the old login was revoked, so a copy of it may still work there.");
+            }
+        }
+        finally
+        {
+            oldClient.Dispose();
         }
     }
 
