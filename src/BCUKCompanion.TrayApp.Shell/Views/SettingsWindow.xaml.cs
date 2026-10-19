@@ -64,8 +64,21 @@ public partial class SettingsWindow : Window
         StatusText.Text = "Logging out...";
 
         // Logs out locally first, then revokes the token on the bot (best-effort, a few seconds at most).
-        bool hadToken = _companionClient.IsLoggedIn;
-        bool revoked = await _companionClient.LogoutAsync().ConfigureAwait(true);
+        bool hadToken;
+        bool revoked;
+        try
+        {
+            hadToken = _companionClient.IsLoggedIn;
+            revoked = await _companionClient.LogoutAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The token file couldn't be read or deleted (locked, or no access): still logged in.
+            IsEnabled = true;
+            StatusText.Text = $"Couldn't log out: {ex.Message}";
+            return;
+        }
+
         LoggedOut?.Invoke(this, EventArgs.Empty);
         if (revoked || !hadToken)
         {
