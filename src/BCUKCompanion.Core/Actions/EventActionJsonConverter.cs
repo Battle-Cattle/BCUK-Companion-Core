@@ -8,8 +8,9 @@ namespace BCUKCompanion.Core.Actions;
 /// hand-written "kind" property (lowercase, independent of whatever <see cref="JsonSerializerOptions"/>
 /// the host configures) resolved against an <see cref="EventActionTypeRegistry"/>, since Core
 /// cannot declare compile-time <c>[JsonDerivedType]</c> attributes for app-specific action types.
-/// An action object that can't be read as a registered kind becomes an
-/// <see cref="UnrecognizedEventAction"/> instead of failing the whole document.
+/// An action entry that can't be read as a registered kind (not an object, no or an unknown
+/// kind, or a value the action type rejects) becomes an <see cref="UnrecognizedEventAction"/>
+/// instead of failing the whole document.
 /// </summary>
 public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) : JsonConverter<IEventAction>
 {
@@ -20,12 +21,12 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
 
+        var json = root.GetRawText();
         if (root.ValueKind != JsonValueKind.Object)
         {
-            throw new JsonException($"Event action JSON must be a JSON object, got {root.ValueKind}.");
+            return new UnrecognizedEventAction(string.Empty, json, $"This action isn't a JSON object ({root.ValueKind}), so it can't be run.");
         }
 
-        var json = root.GetRawText();
         if (!root.TryGetProperty(KindPropertyName, out var kindElement)
             || kindElement.ValueKind != JsonValueKind.String
             || kindElement.GetString() is not { Length: > 0 } kind)
@@ -43,8 +44,12 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
             return (IEventAction?)JsonSerializer.Deserialize(json, actionType, options)
                 ?? new UnrecognizedEventAction(kind, json, $"Couldn't read this \"{kind}\" action.");
         }
-        catch (JsonException ex)
+        catch (Exception ex)
         {
+            // Not only JsonException: an action type's constructor or setter may reject a value
+            // (e.g. ArgumentOutOfRangeException), and the serializer throws NotSupportedException or
+            // InvalidOperationException for shapes it can't bind. Any of them would otherwise fail
+            // the whole config, which the store then replaces with an empty one.
             return new UnrecognizedEventAction(kind, json, $"Couldn't read this \"{kind}\" action: {ex.Message}");
         }
     }
