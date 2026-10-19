@@ -15,33 +15,26 @@ internal sealed class TrayIconController : IDisposable
     public event EventHandler? OpenSettingsRequested;
     public event EventHandler? ExitRequested;
 
+    /// <summary>Raised when a menu item's handler throws, with the item's label and the error.</summary>
+    public event EventHandler<(string Label, Exception Error)>? MenuItemFailed;
+
     public TrayIconController(string displayName, IReadOnlyList<TrayMenuItem>? additionalMenuItems = null)
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Login / Account", null, (_, _) => OpenLoginRequested?.Invoke(this, EventArgs.Empty));
-        menu.Items.Add("Settings", null, (_, _) => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
+        AddItem(menu, "Login / Account", () => OpenLoginRequested?.Invoke(this, EventArgs.Empty));
+        AddItem(menu, "Settings", () => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
 
         if (additionalMenuItems is { Count: > 0 })
         {
             menu.Items.Add(new ToolStripSeparator());
             foreach (TrayMenuItem item in additionalMenuItems)
             {
-                menu.Items.Add(item.Text, null, (_, _) =>
-                {
-                    try
-                    {
-                        item.OnClick();
-                    }
-                    catch (Exception)
-                    {
-                        // Host-supplied callback — don't let it take down the shared tray process.
-                    }
-                });
+                AddItem(menu, item.Text, item.OnClick);
             }
         }
 
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
+        AddItem(menu, "Exit", () => ExitRequested?.Invoke(this, EventArgs.Empty));
 
         _notifyIcon = new NotifyIcon
         {
@@ -51,7 +44,26 @@ internal sealed class TrayIconController : IDisposable
             Visible = true,
         };
 
-        _notifyIcon.DoubleClick += (_, _) => OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
+        _notifyIcon.DoubleClick += (_, _) => RunSafely("Settings", () => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
+    }
+
+    /// <summary>Adds a menu item whose click runs <paramref name="onClick"/> through <see cref="RunSafely"/>.</summary>
+    private void AddItem(ContextMenuStrip menu, string label, Action onClick) =>
+        menu.Items.Add(label, null, (_, _) => RunSafely(label, onClick));
+
+    // A menu click runs on the WinForms message loop, where an escaping exception would bring up
+    // WinForms' crash dialog: report it through MenuItemFailed instead and keep the tray running.
+    /// <summary>Runs a menu item's action, raising <see cref="MenuItemFailed"/> instead of letting an exception escape.</summary>
+    private void RunSafely(string label, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            MenuItemFailed?.Invoke(this, (label, ex));
+        }
     }
 
     /// <summary>

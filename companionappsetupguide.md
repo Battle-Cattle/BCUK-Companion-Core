@@ -65,12 +65,15 @@ OAuth clients (same approach as `gcloud`, GitHub CLI, etc.).
 
 The companion app spins up a tiny HTTP server on `127.0.0.1` on any free
 port (e.g. `http://127.0.0.1:53127/callback`). It generates a random opaque
-`state` string for CSRF binding and keeps it in memory.
+`state` string for CSRF binding and keeps it in memory. It also generates a
+PKCE `code_verifier` (RFC 7636: 43–128 random unreserved characters) and
+keeps it in memory; its `code_challenge` is the base64url (no padding)
+SHA-256 of the verifier.
 
 **Step 2 — App opens the user's browser to the bot's login URL**
 
 ```
-GET https://<bot-host>/companion/login?redirect_uri=http://127.0.0.1:53127/callback&state=<random>
+GET https://<bot-host>/companion/login?redirect_uri=http://127.0.0.1:53127/callback&state=<random>&code_challenge=<challenge>&code_challenge_method=S256
 ```
 
 Requirements enforced server-side (`companionAuth.ts`):
@@ -78,6 +81,10 @@ Requirements enforced server-side (`companionAuth.ts`):
   `http://localhost:<any-port>` — anything else is rejected with a 400. This
   is a hard security requirement; non-loopback redirects are never accepted.
 - `state` is required (any non-empty string) and is echoed back verbatim.
+- `code_challenge` + `code_challenge_method=S256` are optional but
+  recommended (Core's `LoopbackOAuthClient` always sends them). When sent, the
+  code from Step 4 only exchanges with the matching `code_verifier`, so another
+  local process that sees the code can't use it. Only `S256` is accepted.
 
 The server stashes `redirect_uri` + `state` on the user's browser session
 (10-minute TTL) and redirects into the bot's normal Discord OAuth login.
@@ -100,7 +107,9 @@ http://127.0.0.1:53127/callback?code=<one-time-code>&state=<same-state>
 
 The companion app's local HTTP server receives this request. It **must**
 verify the returned `state` matches what it generated in Step 1 before
-proceeding.
+proceeding. A request with no `code` or the wrong `state` (a browser retry,
+or another local process probing the port) should be answered with a 400 and
+ignored, while the app keeps waiting for the real redirect.
 
 **Step 5 — App exchanges the code for a long-lived token**
 
@@ -108,8 +117,11 @@ proceeding.
 POST https://<bot-host>/api/companion/oauth/token
 Content-Type: application/json
 
-{ "code": "<one-time-code>" }
+{ "code": "<one-time-code>", "code_verifier": "<verifier from Step 1>" }
 ```
+
+`code_verifier` is required when Step 2 sent a `code_challenge`, and ignored
+otherwise.
 
 Response:
 ```json
@@ -202,6 +214,7 @@ All take the same `Authorization: Bearer <token>` header and answer with an
 
 | Endpoint | Purpose |
 |---|---|
+| `POST /api/companion/token/revoke` | No body. Revokes the token the request authenticated with and ends its SSE connections — call it when the user logs out, so a copy of the token stops working too. `401` if the token is unknown or already revoked |
 | `GET /api/companion/events/recent` | Activity events (not redemptions or commands) missed while disconnected — call after each reconnect |
 | `GET /api/companion/rewards` | The streamer's Twitch channel-point rewards: `id`, `title`, `prompt`, `cost`, `backgroundColor`, `isEnabled`, `isUserInputRequired`, `companionConfirmationRequired` |
 | `GET /api/companion/commands` | The streamer's advanced commands: `id`, `name`, `trigger`, `pointCost`, `isEnabled`, `companionEnabled`, `parameters` |

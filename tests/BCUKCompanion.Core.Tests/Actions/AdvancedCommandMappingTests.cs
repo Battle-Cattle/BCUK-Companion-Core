@@ -94,6 +94,15 @@ public class AdvancedCommandMappingTests
         Assert.Equal("Lights (0 action(s))", new EventActionMapping("Lights", []).ToString());
     }
 
+    [Fact]
+    public void Combine_SucceedsOnlyWhenEveryHandlerSucceeded()
+    {
+        Assert.Equal((true, (string?)null), AdvancedCommandAck.Combine((true, null), (true, null)));
+        Assert.Equal((false, "host boom"), AdvancedCommandAck.Combine((false, "host boom"), (true, null)));
+        Assert.Equal((false, "host boom; Lamp offline"), AdvancedCommandAck.Combine((false, "host boom"), (false, "Lamp offline")));
+        Assert.Equal((false, "Failed."), AdvancedCommandAck.Combine((true, null), (false, null)));
+    }
+
     private sealed class CapturingAction : IEventAction
     {
         public BotEventArgs? SeenEvent { get; private set; }

@@ -10,7 +10,9 @@ namespace BCUKCompanion.Core.Auth;
 /// loopback-interception OAuth flow. Spins up a local HTTP listener,
 /// hands the caller a URL to open in the user's browser, waits for the
 /// bot to redirect back with a one-time code, and exchanges that code for
-/// a long-lived bearer token.
+/// a long-lived bearer token. Uses PKCE (RFC 7636, S256): only this process,
+/// which holds the verifier, can exchange the code, even if another local
+/// process sees it. A bot that predates PKCE ignores the extra parameters.
 /// </summary>
 public sealed class LoopbackOAuthClient
 {
@@ -34,36 +36,36 @@ public sealed class LoopbackOAuthClient
         CancellationToken cancellationToken = default)
     {
         string state = GenerateState();
+        string codeVerifier = GenerateState();
         using var listener = new HttpListener();
-        int port = StartListenerOnFreePort(listener);
+        int port = LoopbackCallbackListener.StartListenerOnFreePort(listener);
         var redirectUri = new Uri($"http://127.0.0.1:{port}/callback");
 
         try
         {
-            Uri loginUrl = BuildLoginUrl(redirectUri, state);
+            Uri loginUrl = BuildLoginUrl(redirectUri, state, CodeChallenge(codeVerifier));
             await openBrowser(loginUrl).ConfigureAwait(false);
 
-            (HttpListenerContext context, string code) = await WaitForCallbackAsync(
+            (HttpListenerContext context, string code) = await LoopbackCallbackListener.WaitForCallbackAsync(
                 listener, state, timeout ?? TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
 
+            // Don't tell the browser login succeeded until the code has actually been exchanged
+            // for a token — otherwise a later exchange failure leaves the user seeing a false
+            // "success" page. Either response is best-effort: a browser tab that's already gone
+            // must neither lose an issued token nor replace the exchange's own error.
+            string token;
             try
             {
-                // Don't tell the browser login succeeded until the code has actually
-                // been exchanged for a token — otherwise a later exchange failure
-                // leaves the user seeing a false "success" page.
-                string token = await ExchangeCodeForTokenAsync(code, cancellationToken).ConfigureAwait(false);
-                RespondHtml(context, 200, "<html><body>Login successful — you can close this window and return to the app.</body></html>");
-                return token;
+                token = await ExchangeCodeForTokenAsync(code, codeVerifier, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception)
             {
-                RespondHtml(context, 502, "<html><body>Login failed: the app could not complete sign-in. You can close this window.</body></html>");
+                LoopbackCallbackListener.RespondAndClose(context, 502, "<html><body>Login failed: the app could not complete sign-in. You can close this window.</body></html>");
                 throw;
             }
-            finally
-            {
-                context.Response.OutputStream.Close();
-            }
+
+            LoopbackCallbackListener.RespondAndClose(context, 200, "<html><body>Login successful — you can close this window and return to the app.</body></html>");
+            return token;
         }
         finally
         {
@@ -71,118 +73,39 @@ public sealed class LoopbackOAuthClient
         }
     }
 
-    internal Uri BuildLoginUrl(Uri redirectUri, string state)
+    /// <summary>The bot's companion login URL, carrying the loopback redirect, the OAuth <c>state</c> and the PKCE S256 challenge.</summary>
+    internal Uri BuildLoginUrl(Uri redirectUri, string state, string codeChallenge)
     {
-        string query = $"redirect_uri={Uri.EscapeDataString(redirectUri.ToString())}&state={Uri.EscapeDataString(state)}";
+        string query = $"redirect_uri={Uri.EscapeDataString(redirectUri.ToString())}&state={Uri.EscapeDataString(state)}"
+            + $"&code_challenge={Uri.EscapeDataString(codeChallenge)}&code_challenge_method=S256";
         return new Uri(_botHost, $"/companion/login?{query}");
     }
 
+    /// <summary>The PKCE S256 challenge for <paramref name="codeVerifier"/>: base64url (no padding) of its SHA-256.</summary>
+    internal static string CodeChallenge(string codeVerifier) =>
+        Base64Url(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(codeVerifier)));
+
+    /// <summary>Base64url encoding without padding (RFC 4648 §5), as PKCE and the OAuth state use.</summary>
+    private static string Base64Url(ReadOnlySpan<byte> bytes) =>
+        Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+    /// <summary>
+    /// 32 random bytes, base64url-encoded (43 characters): used for the OAuth <c>state</c> and as
+    /// the PKCE code verifier.
+    /// </summary>
     internal static string GenerateState()
     {
         Span<byte> bytes = stackalloc byte[32];
         RandomNumberGenerator.Fill(bytes);
-        return Convert.ToBase64String(bytes)
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
+        return Base64Url(bytes);
     }
 
-    /// <summary>
-    /// Probes for a free loopback port and starts <paramref name="listener"/> on it,
-    /// retrying with a new port if another process wins the race for the one just probed.
-    /// </summary>
-    private static int StartListenerOnFreePort(HttpListener listener)
-    {
-        const int maxAttempts = 5;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            int port = GetFreeLoopbackPort();
-            listener.Prefixes.Clear();
-            listener.Prefixes.Add($"http://127.0.0.1:{port}/callback/");
-            try
-            {
-                listener.Start();
-                return port;
-            }
-            catch (HttpListenerException) when (attempt < maxAttempts)
-            {
-                // Another process grabbed the port between the probe and the bind — retry with a new one.
-            }
-        }
-
-        throw new CompanionAuthException("Could not bind a local port for the companion login callback.");
-    }
-
-    private static int GetFreeLoopbackPort()
-    {
-        var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    private static async Task<(HttpListenerContext Context, string Code)> WaitForCallbackAsync(
-        HttpListener listener, string expectedState, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeout);
-
-        Task<HttpListenerContext> contextTask = listener.GetContextAsync();
-        var cancelTcs = new TaskCompletionSource();
-        using CancellationTokenRegistration registration = timeoutCts.Token.Register(() =>
-        {
-            cancelTcs.TrySetResult();
-        });
-
-        Task completed = await Task.WhenAny(contextTask, cancelTcs.Task).ConfigureAwait(false);
-        if (completed != contextTask)
-        {
-            // contextTask lost the race and is abandoned here. The caller's finally block
-            // will call listener.Stop() shortly after, which typically faults the still-pending
-            // GetContextAsync() (HttpListenerException/ObjectDisposedException). Nothing else
-            // observes that task, so without this it would surface as an unobserved task
-            // exception during finalization. Observe and discard the fault instead of rethrowing.
-            _ = contextTask.ContinueWith(
-                t => t.Exception,
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-
-            // timeoutCts is a linked source, so its token is always canceled here — it fires
-            // both when the caller's own token is canceled and when `timeout` elapses. Check
-            // the caller's token specifically so a deliberate cancel isn't misreported as a timeout.
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new OperationCanceledException("Timed out waiting for the companion login callback.");
-        }
-
-        HttpListenerContext context = await contextTask.ConfigureAwait(false);
-
-        string? code = context.Request.QueryString["code"];
-        string? returnedState = context.Request.QueryString["state"];
-
-        if (string.IsNullOrEmpty(code) || returnedState != expectedState)
-        {
-            RespondHtml(context, 400, "<html><body>Login failed: invalid response from server.</body></html>");
-            context.Response.OutputStream.Close();
-            throw new CompanionAuthException("Loopback callback returned a missing code or mismatched state.");
-        }
-
-        return (context, code);
-    }
-
-    private static void RespondHtml(HttpListenerContext context, int statusCode, string html)
-    {
-        byte[] buffer = System.Text.Encoding.UTF8.GetBytes(html);
-        context.Response.StatusCode = statusCode;
-        context.Response.ContentType = "text/html; charset=utf-8";
-        context.Response.ContentLength64 = buffer.Length;
-        context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-    }
-
-    private async Task<string> ExchangeCodeForTokenAsync(string code, CancellationToken cancellationToken)
+    /// <summary>Exchanges the one-time <paramref name="code"/> and its PKCE <paramref name="codeVerifier"/> for the bearer token.</summary>
+    private async Task<string> ExchangeCodeForTokenAsync(string code, string codeVerifier, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/oauth/token");
         using var response = await _httpClient
-            .PostAsJsonAsync(requestUri, new { code }, cancellationToken)
+            .PostAsJsonAsync(requestUri, new { code, code_verifier = codeVerifier }, cancellationToken)
             .ConfigureAwait(false);
 
         string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);

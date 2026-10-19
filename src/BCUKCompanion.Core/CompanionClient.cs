@@ -355,12 +355,53 @@ public sealed class CompanionClient : IDisposable
         _tokenStore.Save(token);
     }
 
-    /// <summary>Stops listening and discards the stored token.</summary>
+    /// <summary>
+    /// Stops listening and discards the stored token, locally only: the token stays valid on the
+    /// bot. Use <see cref="LogoutAsync"/> for a user logging out, so a copy of the token stops
+    /// working too; this is for when the bot already rejected the token, or can't be reached.
+    /// </summary>
     public void Logout()
     {
-        StopListening();
+        // Token first, so a failed delete leaves the app logged in and still listening
+        // rather than disconnected while holding the token.
         _tokenStore.Clear();
+        StopListening();
     }
+
+    /// <summary>
+    /// Logs out: discards the stored token, stops listening, then asks the bot to revoke it
+    /// (POST /api/companion/token/revoke) so a copy of it stops working too. The local logout
+    /// always happens first; revoking is best-effort, and its failure (offline, a bot that
+    /// predates the endpoint) only leaves the token valid on the bot as <see cref="Logout"/> does.
+    /// </summary>
+    /// <returns>True if the bot revoked the token (or reported it already unknown/revoked); false if there was none or revoking failed.</returns>
+    public async Task<bool> LogoutAsync(CancellationToken cancellationToken = default)
+    {
+        string? token = _tokenStore.Load();
+        Logout();
+        if (token is null)
+        {
+            return false;
+        }
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(RevokeTimeout);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_botHost, "/api/companion/token/revoke"));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using HttpResponseMessage response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
+            // 401 means the bot doesn't know the token or already revoked it: either way it's dead.
+            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>How long <see cref="LogoutAsync"/> waits for the bot to revoke the token.</summary>
+    private static readonly TimeSpan RevokeTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Starts (or restarts) the background SSE listen loop using the saved

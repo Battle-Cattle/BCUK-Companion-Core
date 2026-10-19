@@ -31,5 +31,30 @@ public class DpapiFileTokenStoreTests
             }
         }
     }
+
+    [SkippableFact]
+    public void ClearRemovesATempFileLeftByAnInterruptedSave()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "DPAPI is only supported on Windows.");
+
+        string path = Path.Combine(Path.GetTempPath(), $"bcuk-companion-test-{Guid.NewGuid()}.bin");
+        string tempPath = path + ".tmp";
+        var store = new DpapiFileTokenStore(path);
+        try
+        {
+            store.Save("super-secret-token");
+            File.WriteAllBytes(tempPath, [1, 2, 3]);
+
+            store.Clear();
+
+            Assert.False(File.Exists(path));
+            Assert.False(File.Exists(tempPath));
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(tempPath);
+        }
+    }
 }
 #pragma warning restore CA1416

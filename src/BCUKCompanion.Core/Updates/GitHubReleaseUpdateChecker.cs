@@ -112,13 +112,21 @@ public sealed class GitHubReleaseUpdateChecker
     }
 
     /// <summary>
-    /// Downloads <paramref name="update"/>'s zip to <paramref name="destinationPath"/> and, when
-    /// the release publishes a checksum, verifies it — throwing <see cref="InvalidDataException"/>
-    /// on a mismatch, so a truncated or corrupted download is never installed. On any failure the
+    /// Downloads <paramref name="update"/>'s zip to <paramref name="destinationPath"/> and verifies
+    /// it against the release's checksum — throwing <see cref="InvalidDataException"/> on a
+    /// mismatch, so a truncated or corrupted download is never installed. A release with no
+    /// checksum is refused the same way before anything is downloaded: <c>companion-release.yml</c>
+    /// always publishes one, so its absence means a hand-made or broken release. On any failure the
     /// partially written or mismatched file is deleted.
     /// </summary>
     public async Task DownloadAsync(AvailableUpdate update, string destinationPath, CancellationToken cancellationToken = default)
     {
+        if (update.ChecksumUrl is null)
+        {
+            throw new InvalidDataException(
+                $"Release {update.TagName} has no checksum file, so it can't be verified. Download it manually if you trust it.");
+        }
+
         using (var response = await http.GetAsync(update.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false))
         {
             response.EnsureSuccessStatusCode();
@@ -137,11 +145,6 @@ public sealed class GitHubReleaseUpdateChecker
                 TryDelete(destinationPath);
                 throw;
             }
-        }
-
-        if (update.ChecksumUrl is null)
-        {
-            return;
         }
 
         var checksumText = await http.GetStringAsync(update.ChecksumUrl, cancellationToken).ConfigureAwait(false);
