@@ -65,7 +65,7 @@ public class CompanionClientTests
         using var client = new CompanionClient(new Uri("https://bot.example.com"), tokenStore, new HttpClient(handler));
         client.SetManualToken("abc123");
 
-        Assert.True(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.Revoked, await client.LogoutAsync());
 
         Assert.Null(tokenStore.Load());
         Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
@@ -81,7 +81,7 @@ public class CompanionClientTests
         using var client = new CompanionClient(new Uri("https://bot.example.com"), tokenStore, new HttpClient(handler));
         client.SetManualToken("abc123");
 
-        Assert.False(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.NotConfirmed, await client.LogoutAsync());
         Assert.Null(tokenStore.Load());
     }
 
@@ -92,7 +92,7 @@ public class CompanionClientTests
         using var client = new CompanionClient(new Uri("https://bot.example.com"), new FakeTokenStore(), new HttpClient(handler));
         client.SetManualToken("abc123");
 
-        Assert.True(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.Revoked, await client.LogoutAsync());
         Assert.False(client.IsLoggedIn);
     }
 
@@ -102,7 +102,17 @@ public class CompanionClientTests
         var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.OK, "{}");
         using var client = new CompanionClient(new Uri("https://bot.example.com"), new FakeTokenStore(), new HttpClient(handler));
 
-        Assert.False(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.NoToken, await client.LogoutAsync());
+        Assert.Null(handler.LastRequest);
+    }
+
+    [Fact]
+    public void LogoutAsyncThrowsATokenFileErrorBeforeReturningATask()
+    {
+        var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.OK, "{}");
+        using var client = new CompanionClient(new Uri("https://bot.example.com"), new ThrowingClearTokenStore("abc123"), new HttpClient(handler));
+
+        Assert.Throws<IOException>(() => { _ = client.LogoutAsync(); });
         Assert.Null(handler.LastRequest);
     }
 
@@ -297,4 +307,13 @@ public class CompanionClientTests
 
         Assert.False(faulted);
     }
+}
+
+internal sealed class ThrowingClearTokenStore(string token) : BCUKCompanion.Core.Tokens.ITokenStore
+{
+    public string? Load() => token;
+
+    public void Save(string newToken) => throw new IOException("The token file is locked.");
+
+    public void Clear() => throw new IOException("The token file is locked.");
 }

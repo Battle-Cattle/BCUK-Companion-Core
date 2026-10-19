@@ -371,19 +371,23 @@ public sealed class CompanionClient : IDisposable
     /// <summary>
     /// Logs out: discards the stored token, stops listening, then asks the bot to revoke it
     /// (POST /api/companion/token/revoke) so a copy of it stops working too. The local logout
-    /// always happens first; revoking is best-effort, and its failure (offline, a bot that
-    /// predates the endpoint) only leaves the token valid on the bot as <see cref="Logout"/> does.
+    /// happens before this returns, so a token file that can't be read or deleted throws here
+    /// rather than from the returned task. Revoking is best-effort: its failure (offline, a bot
+    /// that predates the endpoint) only leaves the token valid on the bot, as <see cref="Logout"/> does.
     /// </summary>
-    /// <returns>True if the bot revoked the token (or reported it already unknown/revoked); false if there was none or revoking failed.</returns>
-    public async Task<bool> LogoutAsync(CancellationToken cancellationToken = default)
+    /// <returns>Whether there was a token, and whether the bot confirmed it no longer works.</returns>
+    /// <exception cref="IOException">The token file couldn't be read or deleted.</exception>
+    /// <exception cref="UnauthorizedAccessException">The token file couldn't be read or deleted.</exception>
+    public Task<LogoutResult> LogoutAsync(CancellationToken cancellationToken = default)
     {
         string? token = _tokenStore.Load();
         Logout();
-        if (token is null)
-        {
-            return false;
-        }
+        return token is null ? Task.FromResult(LogoutResult.NoToken) : RevokeAsync(token, cancellationToken);
+    }
 
+    /// <summary>Asks the bot to revoke <paramref name="token"/>, giving up after <see cref="RevokeTimeout"/>.</summary>
+    private async Task<LogoutResult> RevokeAsync(string token, CancellationToken cancellationToken)
+    {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(RevokeTimeout);
         try
@@ -392,11 +396,13 @@ public sealed class CompanionClient : IDisposable
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
             // 401 means the bot doesn't know the token or already revoked it: either way it's dead.
-            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized;
+            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized
+                ? LogoutResult.Revoked
+                : LogoutResult.NotConfirmed;
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
         {
-            return false;
+            return LogoutResult.NotConfirmed;
         }
     }
 
