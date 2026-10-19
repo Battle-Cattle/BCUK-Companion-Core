@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using BCUKCompanion.Core;
 using BCUKCompanion.TrayApp.Services;
@@ -37,9 +38,17 @@ public partial class SettingsWindow : Window
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         _settings.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
-        _settings.Save();
-
-        AutoStartService.SetEnabled(_settings.StartWithWindows);
+        try
+        {
+            _settings.Save();
+            AutoStartService.SetEnabled(_settings.StartWithWindows);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or InvalidOperationException)
+        {
+            // A locked/read-only settings.json or a registry error: say so here rather than crash.
+            StatusText.Text = $"Couldn't save: {ex.Message}";
+            return;
+        }
 
         StatusText.Text = "Saved.";
     }

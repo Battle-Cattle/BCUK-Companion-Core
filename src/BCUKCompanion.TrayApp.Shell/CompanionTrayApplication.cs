@@ -66,6 +66,12 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     {
         base.OnStartup(e);
 
+        // Last-resort handlers, so an exception escaping a window's event handler (a settings file
+        // that can't be written, a registry error, a host window that fails to open) is reported
+        // as a balloon instead of taking down the whole tray app.
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        System.Windows.Forms.Application.ThreadException += (_, args) => ReportUnhandledError(args.Exception);
+
         AppPaths.Configure(_options.DataFolderName);
         AutoStartService.Configure(_options.DataFolderName);
 
@@ -97,6 +103,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
 
         _trayIcon = new TrayIconController(_options.DisplayName, menuItems);
+        _trayIcon.MenuItemFailed += (_, failure) =>
+            _trayIcon.ShowBalloon($"{failure.Label} failed", failure.Error.Message);
         try
         {
             // Host-supplied callback: isolate it (same as OnClientReady/OnBotEvent) so a
@@ -129,6 +137,16 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             ShowLoginWindow();
         }
     }
+
+    private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        ReportUnhandledError(e.Exception);
+    }
+
+    /// <summary>Shows an otherwise-unhandled error as a balloon (once the tray icon exists).</summary>
+    private void ReportUnhandledError(Exception ex) =>
+        _trayIcon?.ShowBalloon($"{_options.DisplayName} hit an error", ex.Message);
 
     private void ShowLoginWindow()
     {
