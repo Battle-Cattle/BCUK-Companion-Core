@@ -84,8 +84,8 @@ internal static class LoopbackCallbackListener
         }
     }
 
-    /// <summary>Answers a request that doesn't complete the login, tolerating a client that already went away.</summary>
-    private static void RespondAndClose(HttpListenerContext context, int statusCode, string html)
+    /// <summary>Answers the browser and closes the response, tolerating a client that already went away.</summary>
+    internal static void RespondAndClose(HttpListenerContext context, int statusCode, string html)
     {
         try
         {
@@ -143,7 +143,7 @@ internal static class LoopbackCallbackListener
     }
 
     /// <summary>Writes <paramref name="html"/> as the response to the browser with <paramref name="statusCode"/>.</summary>
-    internal static void RespondHtml(HttpListenerContext context, int statusCode, string html)
+    private static void RespondHtml(HttpListenerContext context, int statusCode, string html)
     {
         byte[] buffer = System.Text.Encoding.UTF8.GetBytes(html);
         context.Response.StatusCode = statusCode;

@@ -193,12 +193,14 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// <summary>
     /// The Login window's own server field doesn't go through Settings, since it
     /// needs to work before the user is logged in — persist it the same way Settings does.
+    /// Applied before it's saved: if the old token can't be discarded, the change throws with
+    /// nothing saved, so the next launch can't send that token to the new server.
     /// </summary>
     private void OnLoginServerHostChanged(object? sender, string newBotHost)
     {
+        ApplyBotHostChange(newBotHost);
         _settings.BotHost = newBotHost;
         _settings.Save();
-        ApplyBotHostChange(newBotHost);
     }
 
     /// <summary>

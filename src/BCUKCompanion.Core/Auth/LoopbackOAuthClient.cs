@@ -49,24 +49,23 @@ public sealed class LoopbackOAuthClient
             (HttpListenerContext context, string code) = await LoopbackCallbackListener.WaitForCallbackAsync(
                 listener, state, timeout ?? TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
 
+            // Don't tell the browser login succeeded until the code has actually been exchanged
+            // for a token — otherwise a later exchange failure leaves the user seeing a false
+            // "success" page. Either response is best-effort: a browser tab that's already gone
+            // must neither lose an issued token nor replace the exchange's own error.
+            string token;
             try
             {
-                // Don't tell the browser login succeeded until the code has actually
-                // been exchanged for a token — otherwise a later exchange failure
-                // leaves the user seeing a false "success" page.
-                string token = await ExchangeCodeForTokenAsync(code, codeVerifier, cancellationToken).ConfigureAwait(false);
-                LoopbackCallbackListener.RespondHtml(context, 200, "<html><body>Login successful — you can close this window and return to the app.</body></html>");
-                return token;
+                token = await ExchangeCodeForTokenAsync(code, codeVerifier, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception)
             {
-                LoopbackCallbackListener.RespondHtml(context, 502, "<html><body>Login failed: the app could not complete sign-in. You can close this window.</body></html>");
+                LoopbackCallbackListener.RespondAndClose(context, 502, "<html><body>Login failed: the app could not complete sign-in. You can close this window.</body></html>");
                 throw;
             }
-            finally
-            {
-                context.Response.OutputStream.Close();
-            }
+
+            LoopbackCallbackListener.RespondAndClose(context, 200, "<html><body>Login successful — you can close this window and return to the app.</body></html>");
+            return token;
         }
         finally
         {
