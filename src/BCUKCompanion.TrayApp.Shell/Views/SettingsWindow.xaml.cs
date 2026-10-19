@@ -53,9 +53,13 @@ public partial class SettingsWindow : Window
         StatusText.Text = "Saved.";
     }
 
-    private void LogOutButton_Click(object sender, RoutedEventArgs e)
+    private async void LogOutButton_Click(object sender, RoutedEventArgs e)
     {
-        _companionClient.Logout();
+        IsEnabled = false;
+        StatusText.Text = "Logging out...";
+
+        // Logs out locally first, then revokes the token on the bot (best-effort, a few seconds at most).
+        await _companionClient.LogoutAsync().ConfigureAwait(true);
         LoggedOut?.Invoke(this, EventArgs.Empty);
         Close();
     }

@@ -53,7 +53,12 @@ public sealed class DpapiFileTokenStore : ITokenStore
         try
         {
             byte[] encrypted = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.CurrentUser);
-            File.WriteAllBytes(_filePath, encrypted);
+
+            // Written to a temp file and swapped in, so a crash or power loss mid-write can't leave
+            // a truncated blob that silently logs the user out.
+            string tempPath = _filePath + ".tmp";
+            File.WriteAllBytes(tempPath, encrypted);
+            File.Move(tempPath, _filePath, overwrite: true);
         }
         finally
         {

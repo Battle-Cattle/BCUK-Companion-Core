@@ -533,7 +533,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
             if (state == CompanionConnectionState.AuthenticationFailed)
             {
-                _companionClient.StopListening();
+                // The bot rejected the token (revoked or replaced): discard it, so the next launch
+                // doesn't retry it and the Login window starts from a logged-out state.
+                _companionClient.Logout();
                 ShowLoginWindow();
             }
         });

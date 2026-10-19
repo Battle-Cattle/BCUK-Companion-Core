@@ -58,6 +58,44 @@ public class CompanionClientTests
     }
 
     [Fact]
+    public async Task LogoutAsyncClearsTheTokenAndRevokesItOnTheBot()
+    {
+        var tokenStore = new FakeTokenStore();
+        var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.OK, """{"ok":true}""");
+        using var client = new CompanionClient(new Uri("https://bot.example.com"), tokenStore, new HttpClient(handler));
+        client.SetManualToken("abc123");
+
+        Assert.True(await client.LogoutAsync());
+
+        Assert.Null(tokenStore.Load());
+        Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
+        Assert.Equal("/api/companion/token/revoke", handler.LastRequest.RequestUri!.AbsolutePath);
+        Assert.Equal("abc123", handler.LastRequest.Headers.Authorization?.Parameter);
+    }
+
+    [Fact]
+    public async Task LogoutAsyncStillLogsOutLocallyWhenRevokingFails()
+    {
+        var tokenStore = new FakeTokenStore();
+        var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.NotFound, "<html>Page not found.</html>");
+        using var client = new CompanionClient(new Uri("https://bot.example.com"), tokenStore, new HttpClient(handler));
+        client.SetManualToken("abc123");
+
+        Assert.False(await client.LogoutAsync());
+        Assert.Null(tokenStore.Load());
+    }
+
+    [Fact]
+    public async Task LogoutAsyncWithNoTokenDoesNotCallTheBot()
+    {
+        var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.OK, "{}");
+        using var client = new CompanionClient(new Uri("https://bot.example.com"), new FakeTokenStore(), new HttpClient(handler));
+
+        Assert.False(await client.LogoutAsync());
+        Assert.Null(handler.LastRequest);
+    }
+
+    [Fact]
     public void StartListeningWithoutTokenThrows()
     {
         var tokenStore = new FakeTokenStore();
