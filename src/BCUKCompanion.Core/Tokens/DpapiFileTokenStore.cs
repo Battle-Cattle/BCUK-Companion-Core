@@ -15,10 +15,12 @@ public sealed class DpapiFileTokenStore : ITokenStore
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("BCUKCompanion.Token.v1");
 
     private readonly string _filePath;
+    private readonly string _tempPath;
 
     public DpapiFileTokenStore(string filePath)
     {
         _filePath = filePath;
+        _tempPath = filePath + ".tmp";
     }
 
     public string? Load()
@@ -57,13 +59,21 @@ public sealed class DpapiFileTokenStore : ITokenStore
 
             // Written to a temp file, flushed to disk, then swapped in, so a crash or power loss
             // mid-write can't leave a truncated blob that silently logs the user out.
-            string tempPath = _filePath + ".tmp";
-            using (var stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            try
             {
-                stream.Write(encrypted, 0, encrypted.Length);
-                stream.Flush(flushToDisk: true);
+                using (var stream = new FileStream(_tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    stream.Write(encrypted, 0, encrypted.Length);
+                    stream.Flush(flushToDisk: true);
+                }
+                File.Move(_tempPath, _filePath, overwrite: true);
             }
-            File.Move(tempPath, _filePath, overwrite: true);
+            catch
+            {
+                // Don't leave a copy of the token behind; the saved token file is untouched.
+                TryDelete(_tempPath);
+                throw;
+            }
         }
         finally
         {
@@ -71,11 +81,29 @@ public sealed class DpapiFileTokenStore : ITokenStore
         }
     }
 
+    /// <summary>Deletes the saved token file, and any temp copy an interrupted <see cref="Save"/> left behind.</summary>
     public void Clear()
     {
         if (File.Exists(_filePath))
         {
             File.Delete(_filePath);
+        }
+
+        if (File.Exists(_tempPath))
+        {
+            File.Delete(_tempPath);
+        }
+    }
+
+    /// <summary>Best-effort delete used while already handling a failure, so it never masks that failure.</summary>
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
         }
     }
 }

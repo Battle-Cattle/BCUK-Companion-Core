@@ -362,12 +362,14 @@ public sealed class CompanionClient : IDisposable
     /// </summary>
     public void Logout()
     {
-        StopListening();
+        // Token first, so a failed delete leaves the app logged in and still listening
+        // rather than disconnected while holding the token.
         _tokenStore.Clear();
+        StopListening();
     }
 
     /// <summary>
-    /// Logs out: stops listening, discards the stored token, then asks the bot to revoke it
+    /// Logs out: discards the stored token, stops listening, then asks the bot to revoke it
     /// (POST /api/companion/token/revoke) so a copy of it stops working too. The local logout
     /// always happens first; revoking is best-effort, and its failure (offline, a bot that
     /// predates the endpoint) only leaves the token valid on the bot as <see cref="Logout"/> does.
