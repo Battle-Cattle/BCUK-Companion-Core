@@ -89,9 +89,15 @@ public sealed class DpapiFileTokenStore : ITokenStore
             File.Delete(_filePath);
         }
 
-        if (File.Exists(_tempPath))
+        // Deleted unconditionally: File.Exists reports false when it can't check (e.g. access
+        // denied), which would silently leave a token copy behind. File.Delete is a no-op for a
+        // missing file, but throws if the folder itself is missing (nothing was ever saved).
+        try
         {
             File.Delete(_tempPath);
+        }
+        catch (DirectoryNotFoundException)
+        {
         }
     }
 
