@@ -8,6 +8,8 @@ namespace BCUKCompanion.Core.Actions;
 /// hand-written "kind" property (lowercase, independent of whatever <see cref="JsonSerializerOptions"/>
 /// the host configures) resolved against an <see cref="EventActionTypeRegistry"/>, since Core
 /// cannot declare compile-time <c>[JsonDerivedType]</c> attributes for app-specific action types.
+/// An action object that can't be read as a registered kind becomes an
+/// <see cref="UnrecognizedEventAction"/> instead of failing the whole document.
 /// </summary>
 public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) : JsonConverter<IEventAction>
 {
@@ -23,23 +25,40 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
             throw new JsonException($"Event action JSON must be a JSON object, got {root.ValueKind}.");
         }
 
-        if (!root.TryGetProperty(KindPropertyName, out var kindElement) || kindElement.GetString() is not { } kind)
+        var json = root.GetRawText();
+        if (!root.TryGetProperty(KindPropertyName, out var kindElement)
+            || kindElement.ValueKind != JsonValueKind.String
+            || kindElement.GetString() is not { Length: > 0 } kind)
         {
-            throw new JsonException($"Event action JSON is missing a \"{KindPropertyName}\" discriminator.");
+            return new UnrecognizedEventAction(string.Empty, json, $"This action has no \"{KindPropertyName}\", so it can't be run.");
         }
 
         if (!registry.TryGetType(kind, out var actionType))
         {
-            throw new JsonException($"Unknown event action kind \"{kind}\".");
+            return new UnrecognizedEventAction(kind, json, $"Unknown action kind \"{kind}\" — this version of the app can't run it.");
         }
 
-        var json = root.GetRawText();
-        return (IEventAction?)JsonSerializer.Deserialize(json, actionType, options)
-            ?? throw new JsonException($"Failed to deserialize event action of kind \"{kind}\".");
+        try
+        {
+            return (IEventAction?)JsonSerializer.Deserialize(json, actionType, options)
+                ?? new UnrecognizedEventAction(kind, json, $"Couldn't read this \"{kind}\" action.");
+        }
+        catch (JsonException ex)
+        {
+            return new UnrecognizedEventAction(kind, json, $"Couldn't read this \"{kind}\" action: {ex.Message}");
+        }
     }
 
     public override void Write(Utf8JsonWriter writer, IEventAction value, JsonSerializerOptions options)
     {
+        if (value is UnrecognizedEventAction unrecognized)
+        {
+            // Written back exactly as read, so saving a config never loses an action this build can't run.
+            using var saved = JsonDocument.Parse(unrecognized.RawJson);
+            saved.RootElement.WriteTo(writer);
+            return;
+        }
+
         writer.WriteStartObject();
         writer.WriteString(KindPropertyName, value.Kind);
 

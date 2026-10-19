@@ -175,7 +175,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// <summary>
     /// Re-points the companion client at the new bot host without making any
     /// network call — login (and any resulting connection) only happens if the
-    /// user subsequently clicks Login.
+    /// user subsequently clicks Login. The saved token was issued by the old bot, so a
+    /// different server (scheme, host or port) discards it rather than ever sending it to the
+    /// new one; a change that keeps the same server (e.g. only a path) stays logged in.
     /// </summary>
     private void ApplyBotHostChange(string newBotHost)
     {
@@ -184,22 +186,30 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             return;
         }
 
-        bool wasLoggedIn = _companionClient.IsLoggedIn;
+        var newHost = new Uri(newBotHost);
+        bool sameServer = AppSettings.ActivityKey(newHost) == AppSettings.ActivityKey(_botHost);
+        bool keepListening = sameServer && _companionClient.IsLoggedIn;
 
         _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
         _companionClient.Events.ActivityReceived -= OnActivityReceived;
         _companionClient.Events.AdvancedCommandReceived -= OnAdvancedCommandReceived;
         _companionClient.Events.ConnectionStateChanged -= OnConnectionStateChanged;
         _companionClient.ListenLoopFaulted -= OnListenLoopFaulted;
+        if (!sameServer)
+        {
+            _companionClient.Logout();
+            _isConnected = false;
+            _trayIcon.SetStatus(_options.DisplayName, CompanionConnectionState.Disconnected.ToString());
+        }
         _companionClient.Dispose();
 
-        _botHost = new Uri(newBotHost);
+        _botHost = newHost;
         _companionClient = CreateCompanionClient(_botHost);
         _loginWindow?.UpdateCompanionClient(_companionClient, newBotHost);
         _settingsWindow?.UpdateCompanionClient(_companionClient);
         _settingsWindow?.RefreshBotHost(newBotHost);
 
-        if (wasLoggedIn)
+        if (keepListening)
         {
             _companionClient.StartListening();
         }
@@ -248,7 +258,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// <summary>
     /// Shows a balloon for a redemption and hands it to the host's handlers and mapped actions,
     /// then acknowledges it to the bot when its reward requires companion confirmation — a
-    /// failure there cancels the redemption and refunds the viewer.
+    /// failure there cancels the redemption and refunds the viewer. While those actions run, the
+    /// bot gets a progress ping every minute so long actions aren't refunded mid-run.
     /// </summary>
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption)
     {
@@ -259,7 +270,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         {
             _trayIcon.ShowBalloon(redemption.RewardTitle, $"Redeemed by {redemption.DisplayName}");
 
-            (bool ok, string? error) = await HandleBotEventAsync(new BotEventArgs(
+            var botEvent = new BotEventArgs(
                 EventActionDispatcher.RedemptionEventName,
                 new Dictionary<string, string?>
                 {
@@ -270,11 +281,17 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                     ["userName"] = redemption.UserName,
                     ["userInput"] = redemption.UserInput,
                     ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
-                })).ConfigureAwait(true);
-            if (redemption.NeedsAck)
+                });
+            if (!redemption.NeedsAck)
             {
-                await TrySendAckAsync(() => client.AckRedemptionAsync(redemption.Id, ok, error)).ConfigureAwait(true);
+                await HandleBotEventAsync(botEvent).ConfigureAwait(true);
+                return;
             }
+
+            (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
+                () => HandleBotEventAsync(botEvent),
+                ct => client.ReportRedemptionProgressAsync(redemption.Id, ct)).ConfigureAwait(true);
+            await TrySendAckAsync(() => client.AckRedemptionAsync(redemption.Id, ok, error)).ConfigureAwait(true);
         });
     }
 
@@ -339,7 +356,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// <summary>
     /// Shows a balloon for an advanced command, runs it through <see cref="HandleBotEventAsync"/>
     /// like any other event, then acknowledges it to the bot when it asks for an acknowledgement —
-    /// a failure there refunds the viewer.
+    /// a failure there refunds the viewer. While its actions run, the bot gets a progress ping every
+    /// minute so long actions aren't refunded mid-run.
     /// </summary>
     private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command)
     {
@@ -353,11 +371,17 @@ public sealed class CompanionTrayApplication : System.Windows.Application
                 : $"Used by {(string.IsNullOrEmpty(command.UserName) ? command.UserLogin : command.UserName)}";
             _trayIcon.ShowBalloon(command.CommandName, text);
 
-            (bool ok, string? error) = await HandleBotEventAsync(BuildCommandEventArgs(command)).ConfigureAwait(true);
-            if (command.AckRequired)
+            BotEventArgs botEvent = BuildCommandEventArgs(command);
+            if (!command.AckRequired)
             {
-                await TrySendAckAsync(() => client.AckAdvancedCommandAsync(command.Id, ok, error)).ConfigureAwait(true);
+                await HandleBotEventAsync(botEvent).ConfigureAwait(true);
+                return;
             }
+
+            (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
+                () => HandleBotEventAsync(botEvent),
+                ct => client.ReportCommandProgressAsync(command.Id, ct)).ConfigureAwait(true);
+            await TrySendAckAsync(() => client.AckAdvancedCommandAsync(command.Id, ok, error)).ConfigureAwait(true);
         });
     }
 

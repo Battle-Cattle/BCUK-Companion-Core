@@ -323,6 +323,37 @@ public class CompanionEventStreamTests
         Assert.Equal(received[0].OccurredAt, received[1].OccurredAt);
     }
 
+    /// <summary>
+    /// An idle timeout that fires while the connect-time catch-up is still running is a dead
+    /// connection like any other: the stream reconnects instead of RunAsync faulting.
+    /// </summary>
+    [Fact]
+    public async Task IdleTimeoutDuringCatchUpReconnectsInsteadOfFaulting()
+    {
+        var handler = new HangingRecentHttpMessageHandler();
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"))
+        {
+            IdleTimeout = TimeSpan.FromMilliseconds(100),
+        };
+
+        int disconnects = 0;
+        stream.ConnectionStateChanged += (_, state) =>
+        {
+            if (state == CompanionConnectionState.Disconnected)
+            {
+                Interlocked.Increment(ref disconnects);
+            }
+        };
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => Volatile.Read(ref disconnects) >= 1 || runTask.IsCompleted, TestTimeout);
+
+        Assert.False(runTask.IsCompleted, $"RunAsync ended early: {runTask.Exception?.GetBaseException()}");
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+    }
+
     [Fact]
     public async Task NonNetworkExceptionFromConnectIsNotSilentlySwallowed()
     {
@@ -427,6 +458,20 @@ public class CompanionEventStreamTests
         }
         catch (OperationCanceledException)
         {
+        }
+    }
+
+    /// <summary>Accepts the SSE connection but never answers the catch-up request until canceled.</summary>
+    private sealed class HangingRecentHttpMessageHandler : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.RequestUri?.AbsolutePath == "/api/companion/events/recent")
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(string.Empty) };
         }
     }
 

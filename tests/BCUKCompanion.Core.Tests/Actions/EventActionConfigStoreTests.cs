@@ -145,4 +145,30 @@ public sealed class EventActionConfigStoreHookTests : IDisposable
         Assert.Empty(store.Load().Mappings);
         Assert.Equal(0, store.CreateWhenMissingCalls);
     }
+
+    [Fact]
+    public void Load_FileWithAnUnknownActionKind_KeepsEveryOtherActionAndSavesTheUnknownOneBack()
+    {
+        var directory = Path.GetDirectoryName(store.ConfigFilePath)!;
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(store.ConfigFilePath, """
+            {"Mappings":[{"RewardTitle":"Hydrate!","Actions":[
+              {"kind":"delay","DelaySeconds":5},
+              {"kind":"wiz.removedKind","DeviceId":"abc"}
+            ]}]}
+            """);
+
+        var loaded = store.Load();
+
+        var mapping = Assert.Single(loaded.Mappings);
+        Assert.IsType<DelayAction>(mapping.Actions[0]);
+        Assert.Equal("wiz.removedKind", Assert.IsType<UnrecognizedEventAction>(mapping.Actions[1]).Kind);
+        Assert.False(File.Exists(store.ConfigFilePath + ".bak"));
+
+        store.Save(loaded);
+        var reloaded = store.Load();
+        var kept = Assert.IsType<UnrecognizedEventAction>(Assert.Single(reloaded.Mappings).Actions[1]);
+        using var keptJson = System.Text.Json.JsonDocument.Parse(kept.RawJson);
+        Assert.Equal("abc", keptJson.RootElement.GetProperty("DeviceId").GetString());
+    }
 }

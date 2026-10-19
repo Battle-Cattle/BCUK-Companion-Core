@@ -86,22 +86,30 @@ public class EventActionJsonConverterTests
         Assert.Equal(1, kindPropertyCount);
     }
 
-    [Fact]
-    public void Read_UnknownKind_ThrowsJsonException()
+    [Theory]
+    [InlineData("""{"kind":"nonexistent","Brightness":40}""", "nonexistent", "Unknown action kind")]
+    [InlineData("""{"DelaySeconds":5}""", "", "no \"kind\"")]
+    [InlineData("""{"kind":"delay","DelaySeconds":"soon"}""", "delay", "Couldn't read this \"delay\" action")]
+    public void Read_ActionItCantRead_ReturnsUnrecognizedActionThatNeverValidates(string json, string kind, string reason)
     {
-        var registry = new EventActionTypeRegistry();
-        var options = CreateOptions(registry);
+        var options = CreateOptions(new EventActionTypeRegistry());
 
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<IEventAction>("""{"kind":"nonexistent"}""", options));
+        var action = Assert.IsType<UnrecognizedEventAction>(JsonSerializer.Deserialize<IEventAction>(json, options));
+
+        Assert.Equal(kind, action.Kind);
+        Assert.Contains(reason, Assert.Single(action.Validate(new NoServiceEventActionContext())));
     }
 
     [Fact]
-    public void Read_MissingKindProperty_ThrowsJsonException()
+    public void Write_UnrecognizedAction_WritesItBackExactlyAsRead()
     {
-        var registry = new EventActionTypeRegistry();
-        var options = CreateOptions(registry);
+        var options = CreateOptions(new EventActionTypeRegistry());
+        const string json = """{"kind":"wiz.future","DeviceId":"abc","Nested":{"a":[1,2]}}""";
 
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<IEventAction>("""{"DelaySeconds":5}""", options));
+        var action = JsonSerializer.Deserialize<IEventAction>(json, options);
+        var written = JsonSerializer.Serialize(action, options);
+
+        Assert.Equal(json, written);
     }
 
     [Theory]

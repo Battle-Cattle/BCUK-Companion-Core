@@ -36,6 +36,10 @@ public sealed class CompanionEventStream
     private readonly HashSet<string> _seenCommandEventIds = new(StringComparer.Ordinal);
     private readonly Queue<string> _seenCommandEventOrder = new();
 
+    // Test seam: how long the stream may go without receiving anything before it's treated as
+    // dead. The server pings every 25s, so 60s means two missed pings.
+    internal TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
     public event EventHandler<CompanionActivityEvent>? ActivityReceived;
     public event EventHandler<AdvancedCommandEvent>? AdvancedCommandReceived;
@@ -126,7 +130,7 @@ public sealed class CompanionEventStream
         // means the connection is dead even without a TCP-level signal.
         using var idleCts = new CancellationTokenSource();
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, idleCts.Token);
-        ResetIdleTimer(idleCts);
+        ResetIdleTimer(idleCts, IdleTimeout);
 
         HttpResponseMessage response;
         try
@@ -169,21 +173,23 @@ public sealed class CompanionEventStream
             }
 
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connected);
-            ResetIdleTimer(idleCts);
-
-            // The server unilaterally closes SSE connections on token revoke/reissue,
-            // and SSE itself sends no backfill -- so every (re)connect, fetch activity
-            // missed while disconnected before entering the live read loop.
-            await FetchRecentActivityAsync(token, linkedCts.Token).ConfigureAwait(false);
+            ResetIdleTimer(idleCts, IdleTimeout);
 
             try
             {
+                // The server unilaterally closes SSE connections on token revoke/reissue,
+                // and SSE itself sends no backfill -- so every (re)connect, fetch activity
+                // missed while disconnected before entering the live read loop. Inside this
+                // try so an idle timeout that fires while it's still running reconnects (with
+                // backoff) like any other dead connection, instead of escaping RunAsync.
+                await FetchRecentActivityAsync(token, linkedCts.Token).ConfigureAwait(false);
+
                 await using Stream stream = await response.Content.ReadAsStreamAsync(linkedCts.Token).ConfigureAwait(false);
                 using var streamReader = new StreamReader(stream);
                 var sseReader = new SseEventReader(streamReader);
 
                 await foreach (SseEvent sseEvent in sseReader.ReadEventsAsync(
-                    onActivity: () => ResetIdleTimer(idleCts),
+                    onActivity: () => ResetIdleTimer(idleCts, IdleTimeout),
                     cancellationToken: linkedCts.Token).ConfigureAwait(false))
                 {
                     HandleEvent(sseEvent);
@@ -208,11 +214,11 @@ public sealed class CompanionEventStream
         }
     }
 
-    private static void ResetIdleTimer(CancellationTokenSource idleCts)
+    private static void ResetIdleTimer(CancellationTokenSource idleCts, TimeSpan idleTimeout)
     {
         try
         {
-            idleCts.CancelAfter(TimeSpan.FromSeconds(60));
+            idleCts.CancelAfter(idleTimeout);
         }
         catch (ObjectDisposedException)
         {
