@@ -1,7 +1,6 @@
 using System.IO;
 using System.Windows;
 using BCUKCompanion.Core;
-using BCUKCompanion.Core.Actions;
 using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
 using BCUKCompanion.Core.Tokens;
@@ -24,6 +23,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     private Uri _botHost = null!;
     private CompanionClient _companionClient = null!;
     private TrayIconController _trayIcon = null!;
+    private BotEventHandler _botEvents = null!;
     private LoginWindow? _loginWindow;
     private SettingsWindow? _settingsWindow;
     private bool _isConnected;
@@ -87,6 +87,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
 
         _settings = AppSettings.Load();
+        // Its balloons go through _trayIcon, which exists before any bot event can arrive.
+        _botEvents = new BotEventHandler(_options, Dispatcher, (title, text) => _trayIcon.ShowBalloon(title, text));
         _botHost = new Uri(_settings.BotHost);
         _companionClient = CreateCompanionClient(_botHost);
 
@@ -273,54 +275,16 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         return client;
     }
 
-    /// <summary>
-    /// Shows a balloon for a redemption and hands it to the host's handlers and mapped actions,
-    /// then acknowledges it to the bot when its reward requires companion confirmation — a
-    /// failure there cancels the redemption and refunds the viewer. While those actions run, the
-    /// bot gets a progress ping every minute so long actions aren't refunded mid-run.
-    /// </summary>
-    private void OnRedemptionReceived(object? sender, RedemptionEvent redemption)
-    {
-        // Captured now: a bot-host change can replace _companionClient while the actions run,
-        // and the acknowledgement must go to the host the event came from.
-        CompanionClient client = _companionClient;
-        _ = Dispatcher.InvokeAsync(async () =>
-        {
-            _trayIcon.ShowBalloon(redemption.RewardTitle, $"Redeemed by {redemption.DisplayName}");
+    // The client is read when the event arrives: a bot-host change can replace _companionClient
+    // while the actions run, and the acknowledgement must go to the host the event came from.
+    private void OnRedemptionReceived(object? sender, RedemptionEvent redemption) =>
+        _botEvents.OnRedemption(_companionClient, redemption);
 
-            var botEvent = new BotEventArgs(
-                EventActionDispatcher.RedemptionEventName,
-                new Dictionary<string, string?>
-                {
-                    ["redemptionId"] = redemption.Id,
-                    ["rewardId"] = redemption.RewardId,
-                    ["rewardTitle"] = redemption.RewardTitle,
-                    ["userLogin"] = redemption.UserLogin,
-                    ["userName"] = redemption.UserName,
-                    ["userInput"] = redemption.UserInput,
-                    ["redeemedAt"] = redemption.RedeemedAt.ToString("o"),
-                });
-            if (!redemption.NeedsAck)
-            {
-                await HandleBotEventAsync(botEvent).ConfigureAwait(true);
-                return;
-            }
+    private void OnActivityReceived(object? sender, CompanionActivityEvent activity) =>
+        _botEvents.OnActivity(activity);
 
-            (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
-                () => HandleBotEventAsync(botEvent),
-                ct => client.ReportRedemptionProgressAsync(redemption.Id, ct)).ConfigureAwait(true);
-            await TrySendAckAsync(() => client.AckRedemptionAsync(redemption.Id, ok, error)).ConfigureAwait(true);
-        });
-    }
-
-    private static readonly Dictionary<string, string> ActivityTitles = new(StringComparer.Ordinal)
-    {
-        ["follow"] = "New Follower",
-        ["sub"] = "New Sub",
-        ["resub"] = "Resub",
-        ["giftsub"] = "Gift Sub",
-        ["raid"] = "Raid",
-    };
+    private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command) =>
+        _botEvents.OnAdvancedCommand(_companionClient, command);
 
     /// <summary>
     /// Persists the newest activity id shown for a bot host. Runs on the UI thread, like every
@@ -344,185 +308,6 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         }
     }
 
-    /// <summary>
-    /// Shows a balloon for a follow/sub/raid/... and hands it to the host's handlers. Queued on the
-    /// UI thread ahead of the matching <see cref="SaveLastActivityEventId"/>, so the id is only
-    /// saved once the activity has been handled.
-    /// </summary>
-    private void OnActivityReceived(object? sender, CompanionActivityEvent activity)
-    {
-        _ = Dispatcher.InvokeAsync(async () =>
-        {
-            string title = ActivityTitles.TryGetValue(activity.Type, out string? knownTitle) ? knownTitle : activity.Type;
-            string text = string.IsNullOrEmpty(activity.Detail)
-                ? activity.DisplayName
-                : $"{activity.DisplayName} — {activity.Detail}";
-            _trayIcon.ShowBalloon(title, text);
-
-            await HandleBotEventAsync(new BotEventArgs(
-                "activity.received",
-                new Dictionary<string, string?>
-                {
-                    ["type"] = activity.Type,
-                    ["displayName"] = activity.DisplayName,
-                    ["detail"] = activity.Detail,
-                    ["occurredAt"] = activity.OccurredAt.ToString("o"),
-                })).ConfigureAwait(true);
-        });
-    }
-
-    /// <summary>
-    /// Shows a balloon for an advanced command, runs it through <see cref="HandleBotEventAsync"/>
-    /// like any other event, then acknowledges it to the bot when it asks for an acknowledgement —
-    /// a failure there refunds the viewer. While its actions run, the bot gets a progress ping every
-    /// minute so long actions aren't refunded mid-run.
-    /// </summary>
-    private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command)
-    {
-        // Captured now: a bot-host change can replace _companionClient while the actions run,
-        // and the acknowledgement must go to the host the event came from.
-        CompanionClient client = _companionClient;
-        _ = Dispatcher.InvokeAsync(async () =>
-        {
-            string text = command.Source == "streamdeck"
-                ? "Triggered from Stream Deck"
-                : $"Used by {(string.IsNullOrEmpty(command.UserName) ? command.UserLogin : command.UserName)}";
-            _trayIcon.ShowBalloon(command.CommandName, text);
-
-            BotEventArgs botEvent = BuildCommandEventArgs(command);
-            if (!command.AckRequired)
-            {
-                await HandleBotEventAsync(botEvent).ConfigureAwait(true);
-                return;
-            }
-
-            (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
-                () => HandleBotEventAsync(botEvent),
-                ct => client.ReportCommandProgressAsync(command.Id, ct)).ConfigureAwait(true);
-            await TrySendAckAsync(() => client.AckAdvancedCommandAsync(command.Id, ok, error)).ConfigureAwait(true);
-        });
-    }
-
-    /// <summary>
-    /// Sends an acknowledgement to the bot, ignoring a failure to reach it: the bot then refunds
-    /// the viewer once its acknowledgement timeout passes, which is the right outcome when we
-    /// can't say the actions ran.
-    /// </summary>
-    private static async Task TrySendAckAsync(Func<Task<bool>> sendAck)
-    {
-        try
-        {
-            await sendAck().ConfigureAwait(true);
-        }
-        catch (Exception)
-        {
-            // See the summary: the bot's timeout covers an acknowledgement that never arrives.
-        }
-    }
-
-    /// <summary>
-    /// Runs every bot event — redemption, activity or advanced command — through the same steps:
-    /// the host's <see cref="CompanionTrayAppOptions.OnBotEvent"/>, then its awaited
-    /// <see cref="CompanionTrayAppOptions.OnBotEventAsync"/>, then (when the host set
-    /// <see cref="CompanionTrayAppOptions.CreateEventActionDispatcher"/>) the event's mapped
-    /// actions, with a balloon for any that fail. Returns the acknowledgement an advanced command
-    /// or a confirmation-required redemption should send; the other events ignore it.
-    /// </summary>
-    private async Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent)
-    {
-        try
-        {
-            _options.OnBotEvent?.Invoke(botEvent);
-        }
-        catch (Exception)
-        {
-            // Host-supplied callback — don't let it take down the shared tray process.
-        }
-
-        EventDispatchResult? hostResult = null;
-        string? hostError = null;
-        if (_options.OnBotEventAsync is { } handler)
-        {
-            try
-            {
-                hostResult = await handler(botEvent).ConfigureAwait(true);
-            }
-            catch (Exception ex)
-            {
-                hostError = ex.Message;
-            }
-        }
-
-        if (_options.CreateEventActionDispatcher is not { } createDispatcher)
-        {
-            return hostError is null ? AdvancedCommandAck.FromDispatchResult(hostResult) : (false, hostError);
-        }
-
-        (bool Ok, string? Error) actionsAck;
-        try
-        {
-            // Off the UI thread: building the dispatcher typically loads the saved config, and
-            // the actions themselves do network/BLE I/O (and Delay actions wait).
-            EventDispatchResult? result = await Task.Run(() => createDispatcher().DispatchAsync(botEvent)).ConfigureAwait(true);
-            actionsAck = AdvancedCommandAck.FromDispatchResult(result);
-            ReportFailedActions(result);
-        }
-        catch (Exception ex)
-        {
-            _trayIcon.ShowBalloon("Action dispatch crashed", ex.Message);
-            actionsAck = (false, ex.Message);
-        }
-
-        // With both set, the host's own handler counts too: a host that throws, or reports a
-        // failed result, must not be acknowledged as a success just because the mapped actions ran.
-        if (_options.OnBotEventAsync is null)
-        {
-            return actionsAck;
-        }
-
-        (bool Ok, string? Error) hostAck = hostError is not null ? (false, hostError)
-            : hostResult is { ActionResults.Count: > 0 } ? AdvancedCommandAck.FromDispatchResult(hostResult)
-            : (true, null);
-        return AdvancedCommandAck.Combine(hostAck, actionsAck);
-    }
-
-    /// <summary>
-    /// Surfaces actions that ran but failed (a wrong device IP, an offline device, ...) as a
-    /// balloon, since Debug output is compiled out of a Release build.
-    /// </summary>
-    private void ReportFailedActions(EventDispatchResult? result)
-    {
-        if (result?.FailureSummary is { } detail)
-        {
-            _trayIcon.ShowBalloon("Action failed", detail);
-        }
-    }
-
-    /// <summary>
-    /// The <c>command.triggered</c> event handed to the host. Each command parameter is added as
-    /// <c>param.&lt;key&gt;</c>, so actions can read them from the event's metadata.
-    /// </summary>
-    private static BotEventArgs BuildCommandEventArgs(AdvancedCommandEvent command)
-    {
-        var metadata = new Dictionary<string, string?>
-        {
-            ["eventId"] = command.Id,
-            ["commandId"] = command.CommandId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["commandName"] = command.CommandName,
-            ["source"] = command.Source,
-            ["userLogin"] = command.UserLogin,
-            ["userName"] = command.UserName,
-            ["args"] = command.Args,
-            ["pointsSpent"] = command.PointsSpent.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            ["triggeredAt"] = command.TriggeredAt.ToString("o"),
-        };
-        foreach (var (key, value) in command.Parameters ?? [])
-        {
-            metadata[$"param.{key}"] = value;
-        }
-
-        return new BotEventArgs(EventActionDispatcher.CommandEventName, metadata);
-    }
 
     private void OnConnectionStateChanged(object? sender, CompanionConnectionState state)
     {
