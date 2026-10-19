@@ -86,6 +86,17 @@ public class CompanionClientTests
     }
 
     [Fact]
+    public async Task LogoutAsyncCountsAnAlreadyRevokedTokenAsRevoked()
+    {
+        var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.Unauthorized, """{"ok":false}""");
+        using var client = new CompanionClient(new Uri("https://bot.example.com"), new FakeTokenStore(), new HttpClient(handler));
+        client.SetManualToken("abc123");
+
+        Assert.True(await client.LogoutAsync());
+        Assert.False(client.IsLoggedIn);
+    }
+
+    [Fact]
     public async Task LogoutAsyncWithNoTokenDoesNotCallTheBot()
     {
         var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.OK, "{}");

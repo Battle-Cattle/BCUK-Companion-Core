@@ -47,9 +47,11 @@ internal static class LoopbackCallbackListener
     /// <summary>
     /// Waits for the bot's redirect back to the loopback listener. A request without a code or
     /// with the wrong <c>state</c> (a browser retry, or another local process probing the port) is
-    /// answered with 400 and ignored, rather than failing the login: only <paramref name="timeout"/>
-    /// or the caller's cancellation ends the wait.
+    /// answered with 400 and ignored, rather than failing the login. Otherwise only an
+    /// <c>error</c> redirect carrying the expected state, <paramref name="timeout"/> or the
+    /// caller's cancellation ends the wait.
     /// </summary>
+    /// <exception cref="CompanionAuthException">The bot redirected back with an <c>error</c>.</exception>
     internal static async Task<(HttpListenerContext Context, string Code)> WaitForCallbackAsync(
         HttpListener listener, string expectedState, TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -71,16 +73,28 @@ internal static class LoopbackCallbackListener
                 return (context, code);
             }
 
-            try
+            if (GetCallbackError(context, expectedState) is { } error)
             {
-                RespondHtml(context, 400, "<html><body>Login failed: invalid response from server.</body></html>");
-                context.Response.OutputStream.Close();
+                // A genuine failure (e.g. consent denied): fail now rather than wait out the timeout.
+                RespondAndClose(context, 400, "<html><body>Login failed. You can close this window and try again.</body></html>");
+                throw new CompanionAuthException($"Login failed: {error}");
             }
-            catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
-            {
-                // The stray client already went away; keep waiting for the real redirect.
-                context.Response.Abort();
-            }
+
+            RespondAndClose(context, 400, "<html><body>Login failed: invalid response from server.</body></html>");
+        }
+    }
+
+    /// <summary>Answers a request that doesn't complete the login, tolerating a client that already went away.</summary>
+    private static void RespondAndClose(HttpListenerContext context, int statusCode, string html)
+    {
+        try
+        {
+            RespondHtml(context, statusCode, html);
+            context.Response.OutputStream.Close();
+        }
+        catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException or IOException)
+        {
+            context.Response.Abort();
         }
     }
 
@@ -119,6 +133,13 @@ internal static class LoopbackCallbackListener
     {
         code = context.Request.QueryString["code"] ?? string.Empty;
         return code.Length > 0 && context.Request.QueryString["state"] == expectedState;
+    }
+
+    /// <summary>The <c>error</c> of a redirect carrying the expected <c>state</c>, or null if it isn't one.</summary>
+    private static string? GetCallbackError(HttpListenerContext context, string expectedState)
+    {
+        string? error = context.Request.QueryString["error"];
+        return !string.IsNullOrEmpty(error) && context.Request.QueryString["state"] == expectedState ? error : null;
     }
 
     /// <summary>Writes <paramref name="html"/> as the response to the browser with <paramref name="statusCode"/>.</summary>

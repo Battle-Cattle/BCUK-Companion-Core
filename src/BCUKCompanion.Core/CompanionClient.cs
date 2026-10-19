@@ -374,7 +374,7 @@ public sealed class CompanionClient : IDisposable
     /// always happens first; revoking is best-effort, and its failure (offline, a bot that
     /// predates the endpoint) only leaves the token valid on the bot as <see cref="Logout"/> does.
     /// </summary>
-    /// <returns>True if the bot revoked the token; false if there was none or revoking failed.</returns>
+    /// <returns>True if the bot revoked the token (or reported it already unknown/revoked); false if there was none or revoking failed.</returns>
     public async Task<bool> LogoutAsync(CancellationToken cancellationToken = default)
     {
         string? token = _tokenStore.Load();
@@ -391,7 +391,8 @@ public sealed class CompanionClient : IDisposable
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_botHost, "/api/companion/token/revoke"));
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
-            return response.IsSuccessStatusCode;
+            // 401 means the bot doesn't know the token or already revoked it: either way it's dead.
+            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized;
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
         {

@@ -219,6 +219,13 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         bool sameServer = AppSettings.ActivityKey(newHost) == AppSettings.ActivityKey(_botHost);
         bool keepListening = sameServer && _companionClient.IsLoggedIn;
 
+        // First, so a token file that can't be deleted throws before anything is detached and
+        // leaves the app exactly as it was (still wired to the old client).
+        if (!sameServer)
+        {
+            _companionClient.Logout();
+        }
+
         _companionClient.Events.RedemptionReceived -= OnRedemptionReceived;
         _companionClient.Events.ActivityReceived -= OnActivityReceived;
         _companionClient.Events.AdvancedCommandReceived -= OnAdvancedCommandReceived;
@@ -226,7 +233,6 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _companionClient.ListenLoopFaulted -= OnListenLoopFaulted;
         if (!sameServer)
         {
-            _companionClient.Logout();
             _isConnected = false;
             _trayIcon.SetStatus(_options.DisplayName, CompanionConnectionState.Disconnected.ToString());
         }
@@ -332,8 +338,19 @@ public sealed class CompanionTrayApplication : System.Windows.Application
             if (state == CompanionConnectionState.AuthenticationFailed)
             {
                 // The bot rejected the token (revoked or replaced): discard it, so the next launch
-                // doesn't retry it and the Login window starts from a logged-out state.
-                _companionClient.Logout();
+                // doesn't retry it and the Login window starts from a logged-out state. This runs on
+                // the listen loop's thread via Invoke, so a token file that can't be deleted is
+                // reported rather than thrown back into (and faulting) the loop.
+                try
+                {
+                    _companionClient.Logout();
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    _companionClient.StopListening();
+                    _trayIcon.ShowBalloon(_options.DisplayName, $"Couldn't discard the rejected login: {ex.Message}");
+                }
+
                 ShowLoginWindow();
             }
         });

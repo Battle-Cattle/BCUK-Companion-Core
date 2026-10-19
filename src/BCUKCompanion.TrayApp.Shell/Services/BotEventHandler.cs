@@ -182,17 +182,20 @@ internal sealed class BotEventHandler
         }
 
         (bool Ok, string? Error) actionsAck;
+        bool actionsMapped = false;
         try
         {
             // Off the UI thread: building the dispatcher typically loads the saved config, and
             // the actions themselves do network/BLE I/O (and Delay actions wait).
             EventDispatchResult? result = await Task.Run(() => createDispatcher().DispatchAsync(botEvent)).ConfigureAwait(true);
+            actionsMapped = result is { ActionResults.Count: > 0 };
             actionsAck = AdvancedCommandAck.FromDispatchResult(result);
             ReportFailedActions(result);
         }
         catch (Exception ex)
         {
             _showBalloon("Action dispatch crashed", ex.Message);
+            actionsMapped = true; // A crash is a failure, never "nothing mapped".
             actionsAck = (false, ex.Message);
         }
 
@@ -203,9 +206,17 @@ internal sealed class BotEventHandler
             return actionsAck;
         }
 
+        bool hostRanActions = hostResult is { ActionResults.Count: > 0 };
         (bool Ok, string? Error) hostAck = hostError is not null ? (false, hostError)
-            : hostResult is { ActionResults.Count: > 0 } ? AdvancedCommandAck.FromDispatchResult(hostResult)
+            : hostRanActions ? AdvancedCommandAck.FromDispatchResult(hostResult)
             : (true, null);
+
+        // Nothing mapped isn't a failure when the host's own handler ran actions for the event.
+        if (!actionsMapped && hostRanActions && hostError is null)
+        {
+            return hostAck;
+        }
+
         return AdvancedCommandAck.Combine(hostAck, actionsAck);
     }
 

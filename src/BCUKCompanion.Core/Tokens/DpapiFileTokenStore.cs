@@ -84,17 +84,19 @@ public sealed class DpapiFileTokenStore : ITokenStore
     /// <summary>Deletes the saved token file, and any temp copy an interrupted <see cref="Save"/> left behind.</summary>
     public void Clear()
     {
-        if (File.Exists(_filePath))
-        {
-            File.Delete(_filePath);
-        }
+        // No File.Exists checks: it reports false when it can't check (e.g. access denied), which
+        // would silently leave a token behind. File.Delete is a no-op for a missing file, but
+        // throws if the folder itself is missing (nothing was ever saved).
+        DeleteIfFolderExists(_filePath);
+        DeleteIfFolderExists(_tempPath);
+    }
 
-        // Deleted unconditionally: File.Exists reports false when it can't check (e.g. access
-        // denied), which would silently leave a token copy behind. File.Delete is a no-op for a
-        // missing file, but throws if the folder itself is missing (nothing was ever saved).
+    /// <summary>Deletes <paramref name="path"/>; a missing file or folder is not an error.</summary>
+    private static void DeleteIfFolderExists(string path)
+    {
         try
         {
-            File.Delete(_tempPath);
+            File.Delete(path);
         }
         catch (DirectoryNotFoundException)
         {

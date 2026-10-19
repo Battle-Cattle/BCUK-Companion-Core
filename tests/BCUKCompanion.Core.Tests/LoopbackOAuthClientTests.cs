@@ -69,6 +69,31 @@ public class LoopbackOAuthClientTests
         Assert.Equal(challenge, LoopbackOAuthClient.CodeChallenge(verifier));
     }
 
+    [Fact]
+    public async Task LoginAsync_FailsAtOnceOnAnErrorRedirectWithTheExpectedState()
+    {
+        var client = new LoopbackOAuthClient(new HttpClient(new FakeHttpMessageHandler(HttpStatusCode.OK, "{}")), new Uri("https://bot.example.com"));
+        using var browser = new HttpClient();
+        HttpStatusCode? errorStatus = null;
+        Task? browserTask = null;
+
+        var ex = await Assert.ThrowsAsync<CompanionAuthException>(() => client.LoginAsync(loginUrl =>
+        {
+            Dictionary<string, string> query = ParseQuery(loginUrl.Query);
+            browserTask = Task.Run(async () =>
+            {
+                using HttpResponseMessage response = await browser.GetAsync(
+                    $"{query["redirect_uri"]}?error=access_denied&state={Uri.EscapeDataString(query["state"])}");
+                errorStatus = response.StatusCode;
+            });
+            return Task.CompletedTask;
+        }, TimeSpan.FromSeconds(10)));
+        await browserTask!;
+
+        Assert.Contains("access_denied", ex.Message);
+        Assert.Equal(HttpStatusCode.BadRequest, errorStatus);
+    }
+
     private static Dictionary<string, string> ParseQuery(string query)
     {
         var result = new Dictionary<string, string>();
