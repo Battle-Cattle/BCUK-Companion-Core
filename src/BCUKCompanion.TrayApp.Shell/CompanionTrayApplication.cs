@@ -28,7 +28,10 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private bool _isConnected;
 
-    /// <summary>Creates the app; it keeps running with no window open until the user picks Exit.</summary>
+    /// <summary>
+    /// Creates the app. It lives in the tray and keeps running until the user picks Exit, even after its last window
+    /// closes; at startup it opens the login window only if there's no stored login.
+    /// </summary>
     private CompanionTrayApplication(CompanionTrayAppOptions options)
     {
         _options = options;
