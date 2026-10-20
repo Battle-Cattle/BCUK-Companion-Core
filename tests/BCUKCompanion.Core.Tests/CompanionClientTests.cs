@@ -7,7 +7,7 @@ public class CompanionClientTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    private static CompanionClient CreateClient(FakeTokenStore tokenStore) =>
+    private static CompanionClient CreateClient(BCUKCompanion.Core.Tokens.ITokenStore tokenStore) =>
         new(new Uri("https://bot.example.com"), tokenStore, new HttpClient());
 
     [Fact]
@@ -153,6 +153,36 @@ public class CompanionClientTests
         client.StartListening();
 
         Assert.False(await discarded.Task.WaitAsync(TestTimeout));
+        Assert.Equal("new", tokenStore.Load());
+    }
+
+    [Fact]
+    public async Task DiscardRejectedTokenKeepsATokenSavedWhileItWasClearing()
+    {
+        var tokenStore = new GatedClearTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("old");
+        var discard = new TaskCompletionSource<Task<bool>>();
+        client.ListenLoopOverride = (_, _) =>
+        {
+            // Kept running until the discard finishes, as a real loop is while its handler runs.
+            Task<bool> discarding = Task.Run(client.DiscardRejectedToken);
+            discard.TrySetResult(discarding);
+            return discarding;
+        };
+
+        client.StartListening();
+        Task<bool> discarding = await discard.Task.WaitAsync(TestTimeout);
+        await tokenStore.ClearEntered.Task.WaitAsync(TestTimeout);
+
+        // A login finishing on another thread while the rejected token is being deleted.
+        Task saving = Task.Run(() => client.SetManualToken("new"));
+        await Task.Delay(100);
+        Assert.False(saving.IsCompleted);
+        tokenStore.ReleaseClear.Set();
+
+        Assert.True(await discarding.WaitAsync(TestTimeout));
+        await saving.WaitAsync(TestTimeout);
         Assert.Equal("new", tokenStore.Load());
     }
 
@@ -357,6 +387,27 @@ public class CompanionClientTests
         await client.CurrentLoopTask.WaitAsync(TestTimeout);
 
         Assert.False(faulted);
+    }
+}
+
+/// <summary>A token store whose <see cref="Clear"/> blocks until released, to hold a clear in progress.</summary>
+internal sealed class GatedClearTokenStore : BCUKCompanion.Core.Tokens.ITokenStore
+{
+    private volatile string? _token;
+
+    public TaskCompletionSource ClearEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public ManualResetEventSlim ReleaseClear { get; } = new();
+
+    public string? Load() => _token;
+
+    public void Save(string token) => _token = token;
+
+    public void Clear()
+    {
+        ClearEntered.TrySetResult();
+        ReleaseClear.Wait();
+        _token = null;
     }
 }
 

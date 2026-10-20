@@ -168,14 +168,26 @@ public class EventActionJsonConverterTests
         var registry = new EventActionTypeRegistry();
         registry.Register<TestRangeAction>(TestRangeAction.ActionKind);
         var options = CreateOptions(registry);
-        const string json = """{"RewardTitle":"Hydrate!","Actions":["stray",{"kind":"test.range","Percent":-1},{"kind":"delay","DelaySeconds":3}]}""";
+        const string json = """{"RewardTitle":"Hydrate!","Actions":["stray",{"kind":"test.range","Percent":-1},null,{"kind":"delay","DelaySeconds":3}]}""";
 
         var mapping = JsonSerializer.Deserialize<EventActionMapping>(json, options)!;
 
-        Assert.Equal(3, mapping.Actions.Count);
+        Assert.Equal(4, mapping.Actions.Count);
         Assert.IsType<UnrecognizedEventAction>(mapping.Actions[0]);
         Assert.IsType<UnrecognizedEventAction>(mapping.Actions[1]);
-        Assert.Equal(3, Assert.IsType<DelayAction>(mapping.Actions[2]).DelaySeconds);
+        Assert.Contains("null", Assert.Single(Assert.IsType<UnrecognizedEventAction>(mapping.Actions[2]).Validate(new NoServiceEventActionContext())));
+        Assert.Equal(3, Assert.IsType<DelayAction>(mapping.Actions[3]).DelaySeconds);
+    }
+
+    [Fact]
+    public void NullAction_RoundTripsAsNull()
+    {
+        var options = CreateOptions(new EventActionTypeRegistry());
+
+        var action = Assert.IsType<UnrecognizedEventAction>(JsonSerializer.Deserialize<IEventAction>("null", options));
+
+        Assert.Equal("null", JsonSerializer.Serialize<IEventAction>(action, options));
+        Assert.Equal("null", JsonSerializer.Serialize<IEventAction?>(null, options));
     }
 
     [Fact]

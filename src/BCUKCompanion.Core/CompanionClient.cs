@@ -30,6 +30,11 @@ public sealed class CompanionClient : IDisposable
     private CancellationTokenSource? _eventLoopCts;
     private Task _eventLoopTask = Task.CompletedTask;
 
+    // Serialises every token store write (and DiscardRejectedToken's compare-and-clear) so a token
+    // saved by a login finishing on another thread can't be deleted by a clear meant for the
+    // token it replaced. Lock order: this, then _lifecycleLock.
+    private readonly object _tokenStoreLock = new();
+
     // The token the listen loop that's running right now connected with, or null between loops.
     // Loops never overlap, so an event the stream raises comes from the loop using this token.
     private string? _listeningToken;
@@ -345,7 +350,10 @@ public sealed class CompanionClient : IDisposable
     public async Task LoginWithBrowserAsync(Func<Uri, Task> openBrowser, CancellationToken cancellationToken = default)
     {
         string token = await _oauthClient.LoginAsync(openBrowser, cancellationToken: cancellationToken).ConfigureAwait(false);
-        _tokenStore.Save(token);
+        lock (_tokenStoreLock)
+        {
+            _tokenStore.Save(token);
+        }
     }
 
     /// <summary>Saves a token the user pasted in from the dashboard's manual-token page (Option B).</summary>
@@ -356,7 +364,10 @@ public sealed class CompanionClient : IDisposable
             throw new ArgumentException("Token must not be blank.", nameof(token));
         }
 
-        _tokenStore.Save(token);
+        lock (_tokenStoreLock)
+        {
+            _tokenStore.Save(token);
+        }
     }
 
     /// <summary>
@@ -366,10 +377,13 @@ public sealed class CompanionClient : IDisposable
     /// </summary>
     public void Logout()
     {
-        // Token first, so a failed delete leaves the app logged in and still listening
-        // rather than disconnected while holding the token.
-        _tokenStore.Clear();
-        StopListening();
+        lock (_tokenStoreLock)
+        {
+            // Token first, so a failed delete leaves the app logged in and still listening
+            // rather than disconnected while holding the token.
+            _tokenStore.Clear();
+            StopListening();
+        }
     }
 
     /// <summary>
@@ -390,13 +404,17 @@ public sealed class CompanionClient : IDisposable
             rejected = _listeningToken;
         }
 
-        if (rejected is null || _tokenStore.Load() != rejected)
+        // Compared and cleared under one lock, so a login saving a new token can't land in between.
+        lock (_tokenStoreLock)
         {
-            return false;
-        }
+            if (rejected is null || _tokenStore.Load() != rejected)
+            {
+                return false;
+            }
 
-        Logout();
-        return true;
+            Logout();
+            return true;
+        }
     }
 
     /// <summary>
@@ -411,8 +429,13 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="UnauthorizedAccessException">The token file couldn't be read or deleted.</exception>
     public Task<LogoutResult> LogoutAsync(CancellationToken cancellationToken = default)
     {
-        string? token = _tokenStore.Load();
-        Logout();
+        string? token;
+        lock (_tokenStoreLock)
+        {
+            token = _tokenStore.Load();
+            Logout();
+        }
+
         return token is null ? Task.FromResult(LogoutResult.NoToken) : RevokeAsync(token, cancellationToken);
     }
 

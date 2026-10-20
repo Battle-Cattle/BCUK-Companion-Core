@@ -16,8 +16,20 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
 {
     private const string KindPropertyName = "kind";
 
+    /// <summary>
+    /// True, so a JSON null entry reaches <see cref="Read"/> and becomes an <see cref="UnrecognizedEventAction"/>
+    /// instead of leaving a null action in the mapping.
+    /// </summary>
+    public override bool HandleNull => true;
+
+    /// <summary>Reads one action, turning anything that can't be read as a registered kind into an <see cref="UnrecognizedEventAction"/>.</summary>
     public override IEventAction? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            return new UnrecognizedEventAction(string.Empty, "null", "This action is empty (null), so it can't be run.");
+        }
+
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
 
@@ -54,8 +66,16 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
         }
     }
 
-    public override void Write(Utf8JsonWriter writer, IEventAction value, JsonSerializerOptions options)
+    /// <summary>Writes an action with its "kind" first, or an <see cref="UnrecognizedEventAction"/> exactly as it was read.</summary>
+    public override void Write(Utf8JsonWriter writer, IEventAction? value, JsonSerializerOptions options)
     {
+        if (value is null)
+        {
+            // HandleNull makes the serializer hand nulls to this converter on write too.
+            writer.WriteNullValue();
+            return;
+        }
+
         if (value is UnrecognizedEventAction unrecognized)
         {
             // Written back exactly as read, so saving a config never loses an action this build can't run.
