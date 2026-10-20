@@ -7,7 +7,7 @@ public class CompanionClientTests
 {
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(5);
 
-    private static CompanionClient CreateClient(FakeTokenStore tokenStore) =>
+    private static CompanionClient CreateClient(BCUKCompanion.Core.Tokens.ITokenStore tokenStore) =>
         new(new Uri("https://bot.example.com"), tokenStore, new HttpClient());
 
     [Fact]
@@ -65,7 +65,7 @@ public class CompanionClientTests
         using var client = new CompanionClient(new Uri("https://bot.example.com"), tokenStore, new HttpClient(handler));
         client.SetManualToken("abc123");
 
-        Assert.True(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.Revoked, await client.LogoutAsync());
 
         Assert.Null(tokenStore.Load());
         Assert.Equal(HttpMethod.Post, handler.LastRequest!.Method);
@@ -81,7 +81,7 @@ public class CompanionClientTests
         using var client = new CompanionClient(new Uri("https://bot.example.com"), tokenStore, new HttpClient(handler));
         client.SetManualToken("abc123");
 
-        Assert.False(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.NotConfirmed, await client.LogoutAsync());
         Assert.Null(tokenStore.Load());
     }
 
@@ -92,7 +92,7 @@ public class CompanionClientTests
         using var client = new CompanionClient(new Uri("https://bot.example.com"), new FakeTokenStore(), new HttpClient(handler));
         client.SetManualToken("abc123");
 
-        Assert.True(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.Revoked, await client.LogoutAsync());
         Assert.False(client.IsLoggedIn);
     }
 
@@ -102,8 +102,99 @@ public class CompanionClientTests
         var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.OK, "{}");
         using var client = new CompanionClient(new Uri("https://bot.example.com"), new FakeTokenStore(), new HttpClient(handler));
 
-        Assert.False(await client.LogoutAsync());
+        Assert.Equal(LogoutResult.NoToken, await client.LogoutAsync());
         Assert.Null(handler.LastRequest);
+    }
+
+    [Fact]
+    public void LogoutAsyncThrowsATokenFileErrorBeforeReturningATask()
+    {
+        var handler = new FakeHttpMessageHandler(System.Net.HttpStatusCode.OK, "{}");
+        using var client = new CompanionClient(new Uri("https://bot.example.com"), new ThrowingClearTokenStore("abc123"), new HttpClient(handler));
+
+        Assert.Throws<IOException>(() => { _ = client.LogoutAsync(); });
+        Assert.Null(handler.LastRequest);
+    }
+
+    [Fact]
+    public async Task DiscardRejectedTokenClearsTheTokenTheLoopWasUsing()
+    {
+        var tokenStore = new FakeTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("old");
+        var discarded = new TaskCompletionSource<bool>();
+        client.ListenLoopOverride = (_, _) =>
+        {
+            discarded.TrySetResult(client.DiscardRejectedToken());
+            return Task.CompletedTask;
+        };
+
+        client.StartListening();
+
+        Assert.True(await discarded.Task.WaitAsync(TestTimeout));
+        Assert.Null(tokenStore.Load());
+    }
+
+    [Fact]
+    public async Task DiscardRejectedTokenKeepsATokenSavedSinceTheLoopStarted()
+    {
+        var tokenStore = new FakeTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("old");
+        var discarded = new TaskCompletionSource<bool>();
+        client.ListenLoopOverride = (_, _) =>
+        {
+            // The user logged in again while this loop was still connecting with the old token.
+            tokenStore.Save("new");
+            discarded.TrySetResult(client.DiscardRejectedToken());
+            return Task.CompletedTask;
+        };
+
+        client.StartListening();
+
+        Assert.False(await discarded.Task.WaitAsync(TestTimeout));
+        Assert.Equal("new", tokenStore.Load());
+    }
+
+    [Fact]
+    public async Task DiscardRejectedTokenKeepsATokenSavedWhileItWasClearing()
+    {
+        var tokenStore = new GatedClearTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("old");
+        var discard = new TaskCompletionSource<Task<bool>>();
+        client.ListenLoopOverride = (_, _) =>
+        {
+            // Kept running until the discard finishes, as a real loop is while its handler runs.
+            Task<bool> discarding = Task.Run(client.DiscardRejectedToken);
+            discard.TrySetResult(discarding);
+            return discarding;
+        };
+
+        client.StartListening();
+        Task<bool> discarding = await discard.Task.WaitAsync(TestTimeout);
+        await tokenStore.ClearEntered.Task.WaitAsync(TestTimeout);
+
+        // A login finishing on another thread while the rejected token is being deleted.
+        Task saving = Task.Run(() => client.SetManualToken("new"));
+        await Task.Delay(100);
+        Assert.False(saving.IsCompleted);
+        tokenStore.ReleaseClear.Set();
+
+        Assert.True(await discarding.WaitAsync(TestTimeout));
+        await saving.WaitAsync(TestTimeout);
+        Assert.Equal("new", tokenStore.Load());
+    }
+
+    [Fact]
+    public void DiscardRejectedTokenOutsideAListenLoopDoesNothing()
+    {
+        var tokenStore = new FakeTokenStore();
+        using CompanionClient client = CreateClient(tokenStore);
+        client.SetManualToken("abc123");
+
+        Assert.False(client.DiscardRejectedToken());
+        Assert.Equal("abc123", tokenStore.Load());
     }
 
     [Fact]
@@ -297,4 +388,34 @@ public class CompanionClientTests
 
         Assert.False(faulted);
     }
+}
+
+/// <summary>A token store whose <see cref="Clear"/> blocks until released, to hold a clear in progress.</summary>
+internal sealed class GatedClearTokenStore : BCUKCompanion.Core.Tokens.ITokenStore
+{
+    private volatile string? _token;
+
+    public TaskCompletionSource ClearEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public ManualResetEventSlim ReleaseClear { get; } = new();
+
+    public string? Load() => _token;
+
+    public void Save(string token) => _token = token;
+
+    public void Clear()
+    {
+        ClearEntered.TrySetResult();
+        ReleaseClear.Wait();
+        _token = null;
+    }
+}
+
+internal sealed class ThrowingClearTokenStore(string token) : BCUKCompanion.Core.Tokens.ITokenStore
+{
+    public string? Load() => token;
+
+    public void Save(string newToken) => throw new IOException("The token file is locked.");
+
+    public void Clear() => throw new IOException("The token file is locked.");
 }

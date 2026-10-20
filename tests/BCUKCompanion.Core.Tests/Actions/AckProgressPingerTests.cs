@@ -27,7 +27,7 @@ public class AckProgressPingerTests
 
         Task<string> run = AckProgressPinger.RunWithProgressAsync(
             () => release.Task,
-            _ => { Interlocked.Increment(ref pings); return Task.CompletedTask; },
+            _ => { Interlocked.Increment(ref pings); return Task.FromResult(true); },
             FastInterval);
 
         await WaitForPingsAsync(() => Volatile.Read(ref pings), 3);
@@ -43,7 +43,7 @@ public class AckProgressPingerTests
 
         await AckProgressPinger.RunWithProgressAsync(
             () => Task.FromResult(1),
-            _ => { Interlocked.Increment(ref pings); return Task.CompletedTask; },
+            _ => { Interlocked.Increment(ref pings); return Task.FromResult(true); },
             FastInterval);
         int afterRun = Volatile.Read(ref pings);
         await Task.Delay(FastInterval * 5);
@@ -61,8 +61,8 @@ public class AckProgressPingerTests
         Task<bool> run = AckProgressPinger.RunWithProgressAsync(
             () => release.Task,
             _ => Interlocked.Increment(ref pings) == 1
-                ? throw new CompanionApiException("Not found", 404)
-                : Task.CompletedTask,
+                ? throw new CompanionApiException("Server error", 500)
+                : Task.FromResult(true),
             FastInterval);
 
         await WaitForPingsAsync(() => Volatile.Read(ref pings), 2);
@@ -72,11 +72,53 @@ public class AckProgressPingerTests
     }
 
     [Fact]
+    public async Task StopsPingingOnceTheBotIsNoLongerWaiting()
+    {
+        int pings = 0;
+        var release = new TaskCompletionSource<bool>();
+
+        Task<bool> run = AckProgressPinger.RunWithProgressAsync(
+            () => release.Task,
+            _ => Task.FromResult(Interlocked.Increment(ref pings) < 2),
+            FastInterval);
+
+        await WaitForPingsAsync(() => Volatile.Read(ref pings), 2);
+        await Task.Delay(FastInterval * 5);
+
+        Assert.Equal(2, Volatile.Read(ref pings));
+        release.SetResult(true);
+        Assert.True(await run);
+    }
+
+    [Fact]
+    public async Task StopsPingingOnA404()
+    {
+        int pings = 0;
+        var release = new TaskCompletionSource<bool>();
+
+        Task<bool> run = AckProgressPinger.RunWithProgressAsync(
+            () => release.Task,
+            _ =>
+            {
+                Interlocked.Increment(ref pings);
+                throw new CompanionApiException("Not found", 404);
+            },
+            FastInterval);
+
+        await WaitForPingsAsync(() => Volatile.Read(ref pings), 1);
+        await Task.Delay(FastInterval * 5);
+
+        Assert.Equal(1, Volatile.Read(ref pings));
+        release.SetResult(true);
+        Assert.True(await run);
+    }
+
+    [Fact]
     public async Task PropagatesTheWorksFailure()
     {
         await Assert.ThrowsAsync<InvalidOperationException>(() => AckProgressPinger.RunWithProgressAsync<int>(
             () => throw new InvalidOperationException("boom"),
-            _ => Task.CompletedTask,
+            _ => Task.FromResult(true),
             FastInterval));
     }
 }

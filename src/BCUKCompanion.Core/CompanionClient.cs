@@ -30,6 +30,15 @@ public sealed class CompanionClient : IDisposable
     private CancellationTokenSource? _eventLoopCts;
     private Task _eventLoopTask = Task.CompletedTask;
 
+    // Serialises every token store write (and DiscardRejectedToken's compare-and-clear) so a token
+    // saved by a login finishing on another thread can't be deleted by a clear meant for the
+    // token it replaced. Lock order: this, then _lifecycleLock.
+    private readonly object _tokenStoreLock = new();
+
+    // The token the listen loop that's running right now connected with, or null between loops.
+    // Loops never overlap, so an event the stream raises comes from the loop using this token.
+    private string? _listeningToken;
+
     public CompanionEventStream Events { get; }
 
     public bool IsLoggedIn => _tokenStore.Load() is not null;
@@ -341,7 +350,10 @@ public sealed class CompanionClient : IDisposable
     public async Task LoginWithBrowserAsync(Func<Uri, Task> openBrowser, CancellationToken cancellationToken = default)
     {
         string token = await _oauthClient.LoginAsync(openBrowser, cancellationToken: cancellationToken).ConfigureAwait(false);
-        _tokenStore.Save(token);
+        lock (_tokenStoreLock)
+        {
+            _tokenStore.Save(token);
+        }
     }
 
     /// <summary>Saves a token the user pasted in from the dashboard's manual-token page (Option B).</summary>
@@ -352,7 +364,10 @@ public sealed class CompanionClient : IDisposable
             throw new ArgumentException("Token must not be blank.", nameof(token));
         }
 
-        _tokenStore.Save(token);
+        lock (_tokenStoreLock)
+        {
+            _tokenStore.Save(token);
+        }
     }
 
     /// <summary>
@@ -362,28 +377,71 @@ public sealed class CompanionClient : IDisposable
     /// </summary>
     public void Logout()
     {
-        // Token first, so a failed delete leaves the app logged in and still listening
-        // rather than disconnected while holding the token.
-        _tokenStore.Clear();
-        StopListening();
+        lock (_tokenStoreLock)
+        {
+            // Token first, so a failed delete leaves the app logged in and still listening
+            // rather than disconnected while holding the token.
+            _tokenStore.Clear();
+            StopListening();
+        }
+    }
+
+    /// <summary>
+    /// Discards the saved token after the bot rejected the one the listen loop connected with:
+    /// call it from a <see cref="CompanionEventStream.ConnectionStateChanged"/> handler for
+    /// <see cref="CompanionConnectionState.AuthenticationFailed"/>. Only that rejected token is
+    /// discarded (and listening stopped): if a newer one was saved meanwhile, e.g. the user logged
+    /// in again while the old loop was still connecting, it's kept and nothing is changed.
+    /// </summary>
+    /// <returns>True if the rejected token was discarded; false if a different token (or none) is saved now.</returns>
+    /// <exception cref="IOException">The token file couldn't be read or deleted.</exception>
+    /// <exception cref="UnauthorizedAccessException">The token file couldn't be read or deleted.</exception>
+    public bool DiscardRejectedToken()
+    {
+        string? rejected;
+        lock (_lifecycleLock)
+        {
+            rejected = _listeningToken;
+        }
+
+        // Compared and cleared under one lock, so a login saving a new token can't land in between.
+        lock (_tokenStoreLock)
+        {
+            if (rejected is null || _tokenStore.Load() != rejected)
+            {
+                return false;
+            }
+
+            Logout();
+            return true;
+        }
     }
 
     /// <summary>
     /// Logs out: discards the stored token, stops listening, then asks the bot to revoke it
     /// (POST /api/companion/token/revoke) so a copy of it stops working too. The local logout
-    /// always happens first; revoking is best-effort, and its failure (offline, a bot that
-    /// predates the endpoint) only leaves the token valid on the bot as <see cref="Logout"/> does.
+    /// happens before this returns, so a token file that can't be read or deleted throws here
+    /// rather than from the returned task. Revoking is best-effort: its failure (offline, a bot
+    /// that predates the endpoint) only leaves the token valid on the bot, as <see cref="Logout"/> does.
     /// </summary>
-    /// <returns>True if the bot revoked the token (or reported it already unknown/revoked); false if there was none or revoking failed.</returns>
-    public async Task<bool> LogoutAsync(CancellationToken cancellationToken = default)
+    /// <returns>Whether there was a token, and whether the bot confirmed it no longer works.</returns>
+    /// <exception cref="IOException">The token file couldn't be read or deleted.</exception>
+    /// <exception cref="UnauthorizedAccessException">The token file couldn't be read or deleted.</exception>
+    public Task<LogoutResult> LogoutAsync(CancellationToken cancellationToken = default)
     {
-        string? token = _tokenStore.Load();
-        Logout();
-        if (token is null)
+        string? token;
+        lock (_tokenStoreLock)
         {
-            return false;
+            token = _tokenStore.Load();
+            Logout();
         }
 
+        return token is null ? Task.FromResult(LogoutResult.NoToken) : RevokeAsync(token, cancellationToken);
+    }
+
+    /// <summary>Asks the bot to revoke <paramref name="token"/>, giving up after <see cref="RevokeTimeout"/>.</summary>
+    private async Task<LogoutResult> RevokeAsync(string token, CancellationToken cancellationToken)
+    {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(RevokeTimeout);
         try
@@ -392,11 +450,13 @@ public sealed class CompanionClient : IDisposable
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using HttpResponseMessage response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
             // 401 means the bot doesn't know the token or already revoked it: either way it's dead.
-            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized;
+            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized
+                ? LogoutResult.Revoked
+                : LogoutResult.NotConfirmed;
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
         {
-            return false;
+            return LogoutResult.NotConfirmed;
         }
     }
 
@@ -471,6 +531,11 @@ public sealed class CompanionClient : IDisposable
             // observe here -- we're only waiting for it to fully unwind.
         }
 
+        lock (_lifecycleLock)
+        {
+            _listeningToken = token;
+        }
+
         try
         {
             await (ListenLoopOverride ?? Events.RunAsync)(token, cts.Token).ConfigureAwait(false);
@@ -496,6 +561,9 @@ public sealed class CompanionClient : IDisposable
                 {
                     _eventLoopCts = null;
                 }
+
+                // The next loop only starts once this one has unwound, so this is still its token.
+                _listeningToken = null;
             }
 
             // Deferred until the loop has genuinely exited -- disposing eagerly in

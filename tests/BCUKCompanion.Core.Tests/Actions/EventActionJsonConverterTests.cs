@@ -21,6 +21,28 @@ internal sealed class TestEchoAction : IEventAction
     public Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken) => Task.FromResult(true);
 }
 
+internal sealed class TestRangeAction : IEventAction
+{
+    public const string ActionKind = "test.range";
+
+    private int _percent;
+
+    public int Percent
+    {
+        get => _percent;
+        set => _percent = value is >= 0 and <= 100 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "Percent must be 0-100.");
+    }
+
+    [JsonIgnore]
+    public string Kind => ActionKind;
+
+    public string Describe(IEventActionContext context) => $"Range: {Percent}";
+
+    public IReadOnlyList<string> Validate(IEventActionContext context) => [];
+
+    public Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken) => Task.FromResult(true);
+}
+
 public class EventActionJsonConverterTests
 {
     private static JsonSerializerOptions CreateOptions(EventActionTypeRegistry registry) => new()
@@ -116,12 +138,56 @@ public class EventActionJsonConverterTests
     [InlineData("[1,2,3]")]
     [InlineData("\"delay\"")]
     [InlineData("42")]
-    public void Read_NonObjectJson_ThrowsJsonException(string json)
+    public void Read_NonObjectJson_ReturnsUnrecognizedActionWrittenBackAsRead(string json)
+    {
+        var options = CreateOptions(new EventActionTypeRegistry());
+
+        var action = Assert.IsType<UnrecognizedEventAction>(JsonSerializer.Deserialize<IEventAction>(json, options));
+
+        Assert.Contains("isn't a JSON object", Assert.Single(action.Validate(new NoServiceEventActionContext())));
+        Assert.Equal(json, JsonSerializer.Serialize<IEventAction>(action, options));
+    }
+
+    [Fact]
+    public void Read_ActionWhoseSetterThrows_ReturnsUnrecognizedAction()
     {
         var registry = new EventActionTypeRegistry();
+        registry.Register<TestRangeAction>(TestRangeAction.ActionKind);
         var options = CreateOptions(registry);
 
-        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<IEventAction>(json, options));
+        var action = Assert.IsType<UnrecognizedEventAction>(
+            JsonSerializer.Deserialize<IEventAction>("""{"kind":"test.range","Percent":150}""", options));
+
+        Assert.Equal(TestRangeAction.ActionKind, action.Kind);
+        Assert.Contains("Couldn't read this \"test.range\" action", Assert.Single(action.Validate(new NoServiceEventActionContext())));
+    }
+
+    [Fact]
+    public void Read_MappingWithOneBadAction_KeepsTheOtherActions()
+    {
+        var registry = new EventActionTypeRegistry();
+        registry.Register<TestRangeAction>(TestRangeAction.ActionKind);
+        var options = CreateOptions(registry);
+        const string json = """{"RewardTitle":"Hydrate!","Actions":["stray",{"kind":"test.range","Percent":-1},null,{"kind":"delay","DelaySeconds":3}]}""";
+
+        var mapping = JsonSerializer.Deserialize<EventActionMapping>(json, options)!;
+
+        Assert.Equal(4, mapping.Actions.Count);
+        Assert.IsType<UnrecognizedEventAction>(mapping.Actions[0]);
+        Assert.IsType<UnrecognizedEventAction>(mapping.Actions[1]);
+        Assert.Contains("null", Assert.Single(Assert.IsType<UnrecognizedEventAction>(mapping.Actions[2]).Validate(new NoServiceEventActionContext())));
+        Assert.Equal(3, Assert.IsType<DelayAction>(mapping.Actions[3]).DelaySeconds);
+    }
+
+    [Fact]
+    public void NullAction_RoundTripsAsNull()
+    {
+        var options = CreateOptions(new EventActionTypeRegistry());
+
+        var action = Assert.IsType<UnrecognizedEventAction>(JsonSerializer.Deserialize<IEventAction>("null", options));
+
+        Assert.Equal("null", JsonSerializer.Serialize<IEventAction>(action, options));
+        Assert.Equal("null", JsonSerializer.Serialize<IEventAction?>(null, options));
     }
 
     [Fact]
