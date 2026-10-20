@@ -4,16 +4,21 @@ using BCUKCompanion.Core;
 
 namespace BCUKCompanion.TrayApp.Views;
 
+/// <summary>Logs in to the bot, through the browser or with a pasted token, and lets the user change the server first.</summary>
 public partial class LoginWindow : Window
 {
     private CompanionClient _companionClient;
     private bool _isBusy;
 
+    /// <summary>Raised once a login saved a token, just before the window closes.</summary>
     public event EventHandler? LoginSucceeded;
 
     /// <summary>Raised when the user changes the server URL from this window, before any login attempt.</summary>
     public event EventHandler<string>? ServerHostChanged;
 
+    /// <summary>Creates the window for <paramref name="companionClient"/>, showing <paramref name="botHost"/> as the server.</summary>
+    /// <param name="companionClient">The client to log in with.</param>
+    /// <param name="botHost">The current server URL.</param>
     public LoginWindow(CompanionClient companionClient, string botHost)
     {
         _companionClient = companionClient;
@@ -28,6 +33,7 @@ public partial class LoginWindow : Window
         ServerHostBox.Text = botHost;
     }
 
+    /// <summary>Validates and applies the typed server URL (raising <see cref="ServerHostChanged"/>), unless a login is in progress.</summary>
     private void ChangeServerButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isBusy)
@@ -60,6 +66,7 @@ public partial class LoginWindow : Window
             : "Server updated. No connection has been made yet — log in to this server.";
     }
 
+    /// <summary>Runs the browser login and closes the window on success, or shows why it failed.</summary>
     private async void LoginWithBrowserButton_Click(object sender, RoutedEventArgs e)
     {
         SetBusy(true, string.Empty);
@@ -79,6 +86,7 @@ public partial class LoginWindow : Window
         }
     }
 
+    /// <summary>Saves the pasted token and closes the window, or shows why it couldn't.</summary>
     private void SaveTokenButton_Click(object sender, RoutedEventArgs e)
     {
         string token = TokenBox.Password.Trim();
@@ -102,6 +110,7 @@ public partial class LoginWindow : Window
         Close();
     }
 
+    /// <summary>Opens the login URL in the default browser, refusing anything but an http(s) URL.</summary>
     private static Task OpenBrowserAsync(Uri uri)
     {
         // UseShellExecute launches whatever the URL points at, so only ever hand it a web URL —
@@ -115,6 +124,7 @@ public partial class LoginWindow : Window
         return Task.CompletedTask;
     }
 
+    /// <summary>Enables or disables the window's controls around a login attempt, and shows <paramref name="status"/>.</summary>
     private void SetBusy(bool busy, string status)
     {
         _isBusy = busy;

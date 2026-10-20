@@ -511,7 +511,7 @@ public class CompanionEventStreamTests
     }
 
     /// <summary>
-    /// Throws the exception produced by <paramref name="exceptionFactory"/> from every
+    /// Throws the exception produced by its <c>exceptionFactory</c> from every
     /// SendAsync call, counting how many times it was invoked -- used to assert a non-network
     /// exception propagates rather than being caught and retried.
     /// </summary>

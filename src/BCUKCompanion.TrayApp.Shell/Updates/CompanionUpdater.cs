@@ -25,6 +25,11 @@ internal sealed class CompanionUpdater
     // launch check (or a double click) doesn't start a second download.
     private int busy;
 
+    /// <summary>Creates an updater for the running app, whose version comes from the host's entry assembly.</summary>
+    /// <param name="options">Which GitHub repository's releases to update from.</param>
+    /// <param name="displayName">The app's name, for messages.</param>
+    /// <param name="dataFolderName">The app's data folder, where the update is staged.</param>
+    /// <param name="showBalloon">Shows a tray balloon (title, text).</param>
     public CompanionUpdater(CompanionUpdateOptions options, string displayName, string dataFolderName, Action<string, string> showBalloon)
     {
         // The host's exe, not this library, carries the version the release workflow stamps.
@@ -36,6 +41,7 @@ internal sealed class CompanionUpdater
         this.showBalloon = showBalloon;
     }
 
+    /// <summary>The "Check for updates..." tray menu item, which checks now and reports the result.</summary>
     public TrayMenuItem CreateMenuItem() => new("Check for updates...", () => _ = RunAsync(interactive: true));
 
     /// <summary>
@@ -50,8 +56,12 @@ internal sealed class CompanionUpdater
         }
     }
 
-    // Awaits resume on the UI thread (no ConfigureAwait(false)), so message boxes and Shutdown
-    // run where WPF expects them.
+    /// <summary>
+    /// Checks for an update and installs it (after asking, when <paramref name="interactive"/>),
+    /// unless a check is already running. Awaits resume on the UI thread (no ConfigureAwait(false)),
+    /// so message boxes and Shutdown run where WPF expects them.
+    /// </summary>
+    /// <param name="interactive">True for a menu click, which reports every outcome; false for the silent launch check.</param>
     private async Task RunAsync(bool interactive)
     {
         if (Interlocked.Exchange(ref busy, 1) == 1)
@@ -109,10 +119,12 @@ internal sealed class CompanionUpdater
         return update;
     }
 
+    /// <summary>Asks the user whether to install <paramref name="update"/> now.</summary>
     private bool ConfirmInstall(AvailableUpdate update) => MessageBox.Show(
         $"Version {update.Version} is available (you have {checker.CurrentVersion}).\n\nInstall it now? The app will restart.",
         caption, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 
+    /// <summary>Downloads and verifies <paramref name="update"/>, launches the script that swaps it in, then shuts the app down so the script can replace it.</summary>
     private async Task InstallAsync(AvailableUpdate update, bool interactive)
     {
         showBalloon($"Updating {displayName}", $"Downloading v{update.Version}. The app will restart when it's ready.");
@@ -132,6 +144,7 @@ internal sealed class CompanionUpdater
             () => Application.Current.Shutdown(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
     }
 
+    /// <summary>Tells the user an install failed: a balloon for the launch check, or a message box offering the download page for a menu click.</summary>
     private void ReportInstallFailure(AvailableUpdate update, Exception ex, bool interactive)
     {
         string reason = ex is UnauthorizedAccessException

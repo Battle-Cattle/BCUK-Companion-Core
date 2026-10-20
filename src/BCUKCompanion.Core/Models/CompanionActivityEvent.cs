@@ -11,6 +11,7 @@ namespace BCUKCompanion.Core.Models;
 /// </summary>
 public sealed class CompanionActivityEvent
 {
+    /// <summary>The activity: <c>follow</c>, <c>sub</c>, <c>resub</c>, <c>giftsub</c> or <c>raid</c>.</summary>
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
 
@@ -23,12 +24,15 @@ public sealed class CompanionActivityEvent
     [JsonPropertyName("id")]
     public long Id { get; set; }
 
+    /// <summary>The display name of the viewer (or raiding channel) behind the activity.</summary>
     [JsonPropertyName("displayName")]
     public string DisplayName { get; set; } = string.Empty;
 
+    /// <summary>Short extra context for the activity (e.g. a raid's viewer count), or null.</summary>
     [JsonPropertyName("detail")]
     public string? Detail { get; set; }
 
+    /// <summary>When the activity happened.</summary>
     [JsonPropertyName("occurredAt")]
     public DateTimeOffset OccurredAt { get; set; }
 }

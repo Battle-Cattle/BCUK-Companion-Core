@@ -36,6 +36,7 @@ jobs:
       - run: dotnet build samples/BCUKCompanion.TrayApp.Sample
       # The Linux job skips the Windows-only tests (DPAPI token storage); they run here.
       - run: dotnet test tests/BCUKCompanion.Core.Tests
+      - run: dotnet test tests/BCUKCompanion.TrayApp.Shell.Tests
 
   publish-packages:
     name: Pack & publish NuGet packages

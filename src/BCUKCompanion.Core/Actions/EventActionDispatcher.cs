@@ -13,7 +13,9 @@ public sealed class EventActionDispatcher(
     Func<IEventActionContext> contextProvider)
 {
     // Core contract values from BCUKCompanion.Core.Models.BotEventArgs, not arbitrary choices.
+    /// <summary>The event name of a channel-point redemption; its mappings match on the <c>rewardTitle</c> metadata.</summary>
     public const string RedemptionEventName = "redemption.received";
+    /// <summary>The event name of an advanced command; its mappings match on the <c>commandName</c> metadata.</summary>
     public const string CommandEventName = "command.triggered";
     private const string RewardTitleMetadataKey = "rewardTitle";
     private const string CommandNameMetadataKey = "commandName";
@@ -76,6 +78,7 @@ public sealed class EventActionDispatcher(
         return new EventDispatchResult(name, results);
     }
 
+    /// <summary>Validates and runs one action, turning a validation failure or an exception into a failed result. Only the caller's own cancellation propagates.</summary>
     private static async Task<EventActionResult> ExecuteActionAsync(
         IEventAction action, IEventActionContext context, CancellationToken cancellationToken)
     {

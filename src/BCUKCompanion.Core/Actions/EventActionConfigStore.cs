@@ -19,6 +19,10 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     // process so neither observes the other's half-finished file state.
     private readonly object syncRoot = new();
 
+    /// <summary>Creates a store for <c>%APPDATA%\<paramref name="dataFolderName"/>\<paramref name="configFileName"/></c>.</summary>
+    /// <param name="dataFolderName">The app's own data folder name (see <c>CompanionTrayAppOptions.DataFolderName</c>).</param>
+    /// <param name="configFileName">The config file's name.</param>
+    /// <param name="registry">The action kinds the file's mappings can contain.</param>
     protected EventActionConfigStore(string dataFolderName, string configFileName, EventActionTypeRegistry registry)
     {
         ConfigFilePath = Path.Combine(
@@ -30,6 +34,7 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
         };
     }
 
+    /// <summary>The full path of the config file.</summary>
     public string ConfigFilePath { get; }
 
     /// <summary>
@@ -61,6 +66,7 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// </summary>
     protected virtual TConfig OnLoaded(TConfig config) => config;
 
+    /// <summary>Reads and parses the existing file. A file that isn't valid JSON is backed up and replaced by a new <typeparamref name="TConfig"/>; I/O and permission errors propagate.</summary>
     private TConfig ReadConfigFile()
     {
         try
@@ -81,6 +87,8 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
         }
     }
 
+    /// <summary>Writes <paramref name="config"/> to the file, through a temp file so a crash mid-write can't leave it half-written.</summary>
+    /// <param name="config">The config to save.</param>
     public void Save(TConfig config)
     {
         lock (syncRoot)
@@ -94,6 +102,7 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
         }
     }
 
+    /// <summary>Copies the corrupt file to <c>.bak</c> so the user can recover it, logging rather than throwing if that fails.</summary>
     private void TryBackUpCorruptConfig()
     {
         try

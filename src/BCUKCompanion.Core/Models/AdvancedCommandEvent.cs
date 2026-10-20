@@ -10,6 +10,7 @@ namespace BCUKCompanion.Core.Models;
 /// </summary>
 public sealed class AdvancedCommandEvent
 {
+    /// <summary>The event type: always <c>"advanced_command"</c>.</summary>
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
 
@@ -17,6 +18,7 @@ public sealed class AdvancedCommandEvent
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>The command's <see cref="AdvancedCommand.Id"/>.</summary>
     [JsonPropertyName("commandId")]
     public int CommandId { get; set; }
 
@@ -40,6 +42,7 @@ public sealed class AdvancedCommandEvent
     [JsonPropertyName("args")]
     public string? Args { get; set; }
 
+    /// <summary>What the viewer paid for this use, in channel points (refunded if it fails).</summary>
     [JsonPropertyName("pointsSpent")]
     public int PointsSpent { get; set; }
 
@@ -47,9 +50,11 @@ public sealed class AdvancedCommandEvent
     [JsonPropertyName("parameters")]
     public Dictionary<string, string>? Parameters { get; set; }
 
+    /// <summary>Whether this app must acknowledge the use (see <see cref="CompanionClient.AckAdvancedCommandAsync"/>), or the viewer is refunded.</summary>
     [JsonPropertyName("ackRequired")]
     public bool AckRequired { get; set; }
 
+    /// <summary>When the command was used.</summary>
     [JsonPropertyName("triggeredAt")]
     public DateTimeOffset TriggeredAt { get; set; }
 }

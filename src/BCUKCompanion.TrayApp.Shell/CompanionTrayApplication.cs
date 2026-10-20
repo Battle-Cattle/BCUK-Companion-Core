@@ -28,12 +28,18 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     private SettingsWindow? _settingsWindow;
     private bool _isConnected;
 
+    /// <summary>
+    /// Creates the app. It lives in the tray and keeps running until the user picks Exit, even after its last window
+    /// closes; at startup it opens the login window only if there's no stored login.
+    /// </summary>
     private CompanionTrayApplication(CompanionTrayAppOptions options)
     {
         _options = options;
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
     }
 
+    /// <summary>Runs the tray app until the user exits it. Call from the host's <c>[STAThread] Main</c>.</summary>
+    /// <param name="options">The host app's identity, integrations and update settings; defaults suit a single companion app.</param>
     public static void Run(CompanionTrayAppOptions? options = null)
     {
         RemoveLegacyInstallFiles();
@@ -41,10 +47,12 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         ((System.Windows.Application)app).Run();
     }
 
-    // Releases are single-file builds, and the updater never deletes anything, so an install
-    // updated from an older multi-file release still holds that build's loose runtime files. Runs
-    // before WPF starts so none of them are loaded yet. Only a single-file build (no assembly
-    // Location) may do this: a multi-file build, e.g. a developer's, still needs those files.
+    /// <summary>
+    /// Releases are single-file builds, and the updater never deletes anything, so an install
+    /// updated from an older multi-file release still holds that build's loose runtime files. Runs
+    /// before WPF starts so none of them are loaded yet. Only a single-file build (no assembly
+    /// Location) may do this: a multi-file build, e.g. a developer's, still needs those files.
+    /// </summary>
     private static void RemoveLegacyInstallFiles()
     {
         if (!string.IsNullOrEmpty(typeof(CompanionTrayApplication).Assembly.Location) || Environment.ProcessPath is not { } exePath)
@@ -89,7 +97,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
         _settings = AppSettings.Load();
         // Its balloons go through _trayIcon, which exists before any bot event can arrive.
-        _botEvents = new BotEventHandler(_options, Dispatcher, (title, text) => _trayIcon.ShowBalloon(title, text));
+        _botEvents = new BotEventHandler(
+            _options, DispatcherScheduler.For(Dispatcher), (title, text) => _trayIcon.ShowBalloon(title, text));
         _botHost = new Uri(_settings.BotHost);
         _companionClient = CreateCompanionClient(_botHost);
 
@@ -159,6 +168,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     private void ReportUnhandledError(Exception ex) =>
         _trayIcon?.ShowBalloon($"{_options.DisplayName} hit an error", ex.Message);
 
+    /// <summary>Shows the login window, or brings the open one to the front.</summary>
     private void ShowLoginWindow()
     {
         if (_loginWindow is not null)
@@ -175,6 +185,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _loginWindow.Activate();
     }
 
+    /// <summary>Shows the settings window, or brings the open one to the front.</summary>
     private void ShowSettingsWindow()
     {
         if (_settingsWindow is not null)
@@ -411,6 +422,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         });
     }
 
+    /// <summary>Disconnects, removes the tray icon and releases the single-instance lock.</summary>
+    /// <param name="e">The exit event.</param>
     protected override void OnExit(ExitEventArgs e)
     {
         _companionClient?.Dispose();

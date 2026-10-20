@@ -10,6 +10,10 @@ namespace BCUKCompanion.TrayApp;
 /// </summary>
 public static class SingletonWindowMenuItem
 {
+    /// <summary>Creates the menu item.</summary>
+    /// <typeparam name="TWindow">The window type.</typeparam>
+    /// <param name="label">The menu item's text.</param>
+    /// <param name="createWindow">Creates a new window, when none is open.</param>
     public static TrayMenuItem Create<TWindow>(string label, Func<TWindow> createWindow) where TWindow : Window
     {
         TWindow? window = null;

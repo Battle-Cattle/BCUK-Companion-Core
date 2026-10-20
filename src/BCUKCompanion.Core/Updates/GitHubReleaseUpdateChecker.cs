@@ -61,6 +61,7 @@ public sealed class GitHubReleaseUpdateChecker
         http = httpClient ?? CreateHttpClient(repoName, currentVersion);
     }
 
+    /// <summary>The version of the running app, which releases are compared against.</summary>
     public AppVersion CurrentVersion { get; }
 
     /// <summary>
@@ -159,8 +160,10 @@ public sealed class GitHubReleaseUpdateChecker
         }
     }
 
-    // Release URLs come from the API response and the page URL is later opened with the shell,
-    // so anything that isn't plain https (file:, a UNC path, another scheme) is rejected.
+    /// <summary>
+    /// Release URLs come from the API response and the page URL is later opened with the shell,
+    /// so anything that isn't plain https (file:, a UNC path, another scheme) is rejected.
+    /// </summary>
     private static bool TryCreateHttpsUri(string? value, [NotNullWhen(true)] out Uri? uri)
     {
         if (Uri.TryCreate(value, UriKind.Absolute, out uri) && uri.Scheme == Uri.UriSchemeHttps)
@@ -172,7 +175,7 @@ public sealed class GitHubReleaseUpdateChecker
         return false;
     }
 
-    // Best-effort: a failure to clean up must not hide the download or checksum error that caused it.
+    /// <summary>Best-effort: a failure to clean up must not hide the download or checksum error that caused it.</summary>
     private static void TryDelete(string path)
     {
         try
@@ -209,6 +212,7 @@ public sealed class GitHubReleaseUpdateChecker
         }
     }
 
+    /// <summary>Creates the client used when the caller doesn't pass one, with the User-Agent and Accept headers GitHub's API expects.</summary>
     private static HttpClient CreateHttpClient(string repoName, AppVersion currentVersion)
     {
         var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
@@ -219,16 +223,23 @@ public sealed class GitHubReleaseUpdateChecker
         return client;
     }
 
+    /// <summary>The parts of a GitHub API release this checker reads.</summary>
     private sealed class GitHubRelease
     {
+        /// <summary>The release's tag, e.g. <c>v1.2.3</c>.</summary>
         [JsonPropertyName("tag_name")] public string? TagName { get; set; }
+        /// <summary>The release's page on GitHub.</summary>
         [JsonPropertyName("html_url")] public string? HtmlUrl { get; set; }
+        /// <summary>The files attached to the release.</summary>
         [JsonPropertyName("assets")] public List<GitHubAsset>? Assets { get; set; }
     }
 
+    /// <summary>The parts of a GitHub API release asset this checker reads.</summary>
     private sealed class GitHubAsset
     {
+        /// <summary>The asset's file name.</summary>
         [JsonPropertyName("name")] public string? Name { get; set; }
+        /// <summary>Where the asset downloads from.</summary>
         [JsonPropertyName("browser_download_url")] public string? BrowserDownloadUrl { get; set; }
     }
 }

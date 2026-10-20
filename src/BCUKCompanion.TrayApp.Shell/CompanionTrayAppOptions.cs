@@ -13,6 +13,7 @@ namespace BCUKCompanion.TrayApp;
 /// </summary>
 public sealed class CompanionTrayAppOptions
 {
+    /// <summary>The folder name for this app's settings and token, also used for its single-instance lock and startup registry entry. Must be unique to the app.</summary>
     public string DataFolderName { get; init; } = "BCUKCompanion";
 
     /// <summary>

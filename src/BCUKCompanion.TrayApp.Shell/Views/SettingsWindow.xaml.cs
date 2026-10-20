@@ -5,13 +5,19 @@ using BCUKCompanion.TrayApp.Services;
 
 namespace BCUKCompanion.TrayApp.Views;
 
+/// <summary>Shows the server and connection status, and lets the user toggle start-with-Windows and log out.</summary>
 public partial class SettingsWindow : Window
 {
     private CompanionClient _companionClient;
     private readonly AppSettings _settings;
 
+    /// <summary>Raised after the user logs out from this window.</summary>
     public event EventHandler? LoggedOut;
 
+    /// <summary>Creates the window.</summary>
+    /// <param name="companionClient">The client to log out with.</param>
+    /// <param name="settings">The settings to show and update.</param>
+    /// <param name="isConnected">Whether the event stream is connected right now.</param>
     public SettingsWindow(CompanionClient companionClient, AppSettings settings, bool isConnected)
     {
         _companionClient = companionClient;
@@ -91,6 +97,7 @@ public partial class SettingsWindow : Window
             + "may still work. Logging in again replaces it, or revoke it from the bot's dashboard.";
     }
 
+    /// <summary>Closes the window.</summary>
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         Close();

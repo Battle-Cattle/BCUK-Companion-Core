@@ -19,5 +19,12 @@ public interface IEventAction
     /// <summary>Returns validation error messages; an empty list means valid.</summary>
     IReadOnlyList<string> Validate(IEventActionContext context);
 
+    /// <summary>Runs the action. The dispatcher validates it first and turns an exception into a failed result, so an implementation can throw for a missing service or device.</summary>
+    /// <param name="context">
+    /// Provides the services the action needs. When dispatched for a bot event, it also provides that
+    /// event as <c>BotEventArgs</c>; a run without one (such as the mappings window's Test button) has none.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the action, e.g. when the app is shutting down.</param>
+    /// <returns>Whether the action succeeded.</returns>
     Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken);
 }

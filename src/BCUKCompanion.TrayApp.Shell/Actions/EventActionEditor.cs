@@ -37,5 +37,6 @@ public abstract class EventActionEditor
     /// </summary>
     public abstract IEventAction? TryBuild(out string? error);
 
+    /// <summary>The category name, as the dialog's picker shows it.</summary>
     public override string ToString() => DisplayName;
 }
