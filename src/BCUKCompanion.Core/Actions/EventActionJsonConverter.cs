@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -32,25 +33,50 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
 
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
-
         var json = root.GetRawText();
+
+        return TryResolveType(root, out string kind, out Type? actionType, out string? problem)
+            ? Deserialize(json, kind, actionType, options)
+            : new UnrecognizedEventAction(kind, json, problem);
+    }
+
+    /// <summary>Finds the registered type for an action's "kind", or says why it can't be run.</summary>
+    /// <param name="root">The action's JSON.</param>
+    /// <param name="kind">The action's kind, or empty if it has none.</param>
+    /// <param name="actionType">The registered type for <paramref name="kind"/>, when found.</param>
+    /// <param name="problem">Why the action can't be run, when no type was found.</param>
+    private bool TryResolveType(
+        JsonElement root,
+        out string kind,
+        [NotNullWhen(true)] out Type? actionType,
+        [NotNullWhen(false)] out string? problem)
+    {
+        kind = string.Empty;
+        actionType = null;
         if (root.ValueKind != JsonValueKind.Object)
         {
-            return new UnrecognizedEventAction(string.Empty, json, $"This action isn't a JSON object ({root.ValueKind}), so it can't be run.");
+            problem = $"This action isn't a JSON object ({root.ValueKind}), so it can't be run.";
+            return false;
         }
 
         if (!root.TryGetProperty(KindPropertyName, out var kindElement)
             || kindElement.ValueKind != JsonValueKind.String
-            || kindElement.GetString() is not { Length: > 0 } kind)
+            || kindElement.GetString() is not { Length: > 0 } foundKind)
         {
-            return new UnrecognizedEventAction(string.Empty, json, $"This action has no \"{KindPropertyName}\", so it can't be run.");
+            problem = $"This action has no \"{KindPropertyName}\", so it can't be run.";
+            return false;
         }
 
-        if (!registry.TryGetType(kind, out var actionType))
-        {
-            return new UnrecognizedEventAction(kind, json, $"Unknown action kind \"{kind}\" — this version of the app can't run it.");
-        }
+        kind = foundKind;
+        problem = registry.TryGetType(kind, out actionType)
+            ? null
+            : $"Unknown action kind \"{kind}\" — this version of the app can't run it.";
+        return problem is null;
+    }
 
+    /// <summary>Deserializes an action of a registered type, or an <see cref="UnrecognizedEventAction"/> if its values can't be read.</summary>
+    private static IEventAction Deserialize(string json, string kind, Type actionType, JsonSerializerOptions options)
+    {
         try
         {
             return (IEventAction?)JsonSerializer.Deserialize(json, actionType, options)
