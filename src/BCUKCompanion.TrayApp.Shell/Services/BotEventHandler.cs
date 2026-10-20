@@ -1,4 +1,3 @@
-using System.Windows.Threading;
 using BCUKCompanion.Core;
 using BCUKCompanion.Core.Actions;
 using BCUKCompanion.Core.Models;
@@ -8,19 +7,26 @@ namespace BCUKCompanion.TrayApp.Services;
 /// <summary>
 /// Runs each bot event (redemption, activity or advanced command) the tray app receives: a
 /// balloon, the host's handlers, the event's mapped actions, and the acknowledgement the bot is
-/// waiting for. Event handlers are queued on the UI thread.
+/// waiting for. Event handlers are queued on the UI thread through the delegate the tray app
+/// passes in, which keeps this class free of WPF so it can be tested on its own.
 /// </summary>
 internal sealed class BotEventHandler
 {
     private readonly CompanionTrayAppOptions _options;
-    private readonly Dispatcher _dispatcher;
+    private readonly Func<Func<Task>, Task> _runOnUiThread;
     private readonly Action<string, string> _showBalloon;
 
     /// <summary>Creates the handler for a tray app with <paramref name="options"/>; balloons go through <paramref name="showBalloon"/>.</summary>
-    public BotEventHandler(CompanionTrayAppOptions options, Dispatcher dispatcher, Action<string, string> showBalloon)
+    /// <param name="options">The host app's handlers and action dispatcher.</param>
+    /// <param name="runOnUiThread">
+    /// Queues work on the UI thread, in order, and returns a task for it (the tray app passes its
+    /// dispatcher's <c>InvokeAsync</c>). Its tasks are never awaited: each handler catches its own errors.
+    /// </param>
+    /// <param name="showBalloon">Shows a tray balloon (title, text).</param>
+    public BotEventHandler(CompanionTrayAppOptions options, Func<Func<Task>, Task> runOnUiThread, Action<string, string> showBalloon)
     {
         _options = options;
-        _dispatcher = dispatcher;
+        _runOnUiThread = runOnUiThread;
         _showBalloon = showBalloon;
     }
 
@@ -41,7 +47,7 @@ internal sealed class BotEventHandler
     /// </summary>
     public void OnRedemption(CompanionClient client, RedemptionEvent redemption)
     {
-        _ = _dispatcher.InvokeAsync(async () =>
+        _ = _runOnUiThread(async () =>
         {
             _showBalloon(redemption.RewardTitle, $"Redeemed by {redemption.DisplayName}");
 
@@ -77,7 +83,7 @@ internal sealed class BotEventHandler
     /// </summary>
     public void OnActivity(CompanionActivityEvent activity)
     {
-        _ = _dispatcher.InvokeAsync(async () =>
+        _ = _runOnUiThread(async () =>
         {
             string title = ActivityTitles.TryGetValue(activity.Type, out string? knownTitle) ? knownTitle : activity.Type;
             string text = string.IsNullOrEmpty(activity.Detail)
@@ -105,7 +111,7 @@ internal sealed class BotEventHandler
     /// </summary>
     public void OnAdvancedCommand(CompanionClient client, AdvancedCommandEvent command)
     {
-        _ = _dispatcher.InvokeAsync(async () =>
+        _ = _runOnUiThread(async () =>
         {
             string text = command.Source == "streamdeck"
                 ? "Triggered from Stream Deck"
