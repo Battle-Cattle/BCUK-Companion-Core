@@ -482,7 +482,7 @@ public sealed class CompanionEventStream
         redemption.RedeemedAt != default
         && RequiredStringFields(redemption).All(field => !string.IsNullOrWhiteSpace(field));
 
-    /// <summary>The string fields a redemption must have for <see cref="IsComplete"/>.</summary>
+    /// <summary>The string fields a redemption must have for <see cref="IsComplete(RedemptionEvent)"/>.</summary>
     private static IEnumerable<string> RequiredStringFields(RedemptionEvent redemption)
     {
         yield return redemption.Type;

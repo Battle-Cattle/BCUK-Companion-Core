@@ -8,8 +8,8 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- SA1600 reports the same missing docs, for every accessibility rather than only public ones. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <!-- A <param> or <see cref> that no longer matches the code is a stale doc comment. -->
-    <WarningsAsErrors>$(WarningsAsErrors);CS1572;CS1573;CS1574;CS1580;CS1584;CS1734</WarningsAsErrors>
+    <!-- A <param> or <see cref> that no longer matches the code, or is ambiguous, is a stale doc comment. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CS0419;CS1572;CS1573;CS1574;CS1580;CS1584;CS1734</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>
