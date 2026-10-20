@@ -95,7 +95,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
         _settings = AppSettings.Load();
         // Its balloons go through _trayIcon, which exists before any bot event can arrive.
         _botEvents = new BotEventHandler(
-            _options, work => Dispatcher.InvokeAsync(work).Task.Unwrap(), (title, text) => _trayIcon.ShowBalloon(title, text));
+            _options, DispatcherScheduler.For(Dispatcher), (title, text) => _trayIcon.ShowBalloon(title, text));
         _botHost = new Uri(_settings.BotHost);
         _companionClient = CreateCompanionClient(_botHost);
 
