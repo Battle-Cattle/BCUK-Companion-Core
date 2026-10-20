@@ -1,0 +1,19 @@
+<Project>
+  <!--
+    Every type and member needs an XML doc comment, including internal and private ones (CLAUDE.md,
+    "Docstrings"). StyleCop's documentation rules enforce that at build time; .editorconfig turns them
+    into errors and switches off the rest of StyleCop, and stylecop.json extends them to non-public members.
+  -->
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- SA1600 reports the same missing docs, for every accessibility rather than only public ones. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- A <param> or <see cref> that no longer matches the code is a stale doc comment. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CS1572;CS1573;CS1574;CS1580;CS1584;CS1734</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StyleCop.Analyzers" Version="1.2.0-beta.556" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)stylecop.json" Link="stylecop.json" />
+  </ItemGroup>
+</Project>

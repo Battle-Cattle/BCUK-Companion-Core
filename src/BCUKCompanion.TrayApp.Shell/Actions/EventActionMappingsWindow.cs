@@ -20,6 +20,7 @@ namespace BCUKCompanion.TrayApp.Actions;
 /// </summary>
 public interface IEventActionMappingsConfig
 {
+    /// <summary>Which bot events run which actions.</summary>
     List<EventActionMapping> Mappings { get; }
 }
 
@@ -47,10 +48,14 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// </summary>
     private readonly Func<CompanionClient?>? getCompanionClient;
 
+    /// <summary>The mappings being edited; saved by <see cref="BuildConfig"/> when the user clicks Save.</summary>
     protected readonly ObservableCollection<EventActionMapping> Mappings;
 
+    /// <summary>Lists <see cref="Mappings"/>; the selected one's actions show in <see cref="ActionsList"/>.</summary>
     protected readonly ListBox MappingsList = new() { Margin = new Thickness(0, 0, 0, 8), MinHeight = 200 };
+    /// <summary>Lists the selected mapping's actions, in the order they run.</summary>
     protected readonly ListBox ActionsList = new() { Margin = new Thickness(0, 0, 0, 8), MinHeight = 160 };
+    /// <summary>The reward title or command name for a new mapping, with suggestions (see <see cref="RefreshRewardTitleSuggestions"/>).</summary>
     protected readonly ComboBox RewardTitleCombo = new() { IsEditable = true, Margin = new Thickness(0, 0, 0, 8) };
 
     /// <summary>Whether a new mapping matches a channel-point reward or an advanced command.</summary>
@@ -61,20 +66,31 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         Margin = new Thickness(0, 0, 0, 8),
     };
 
+    /// <summary>The trigger kind picked in <see cref="TriggerKindCombo"/>, defaulting to a reward.</summary>
     private EventActionTriggerKind SelectedKind =>
         TriggerKindCombo.SelectedItem is EventActionTriggerKind kind ? kind : EventActionTriggerKind.Reward;
+    /// <summary>One-line feedback for the last action (saved, test results, what to select first).</summary>
     protected readonly TextBlock StatusText = new() { Margin = new Thickness(12, 0, 12, 12) };
+    /// <summary>Saves <see cref="BuildConfig"/> to the config file.</summary>
     protected readonly Button SaveButton = new() { Content = "Save", Width = 90, HorizontalAlignment = HorizontalAlignment.Right };
 
+    /// <summary>The config the window opened with, for a subclass to read its integration-specific state from.</summary>
     protected TConfig InitialConfig { get; }
 
+    /// <summary>One row of <see cref="ActionsList"/>: an action and its description.</summary>
     private sealed class ActionListItem(IEventAction action, string display)
     {
+        /// <summary>The action the row shows.</summary>
         public IEventAction Action { get; } = action;
 
+        /// <summary>The action's description, as shown in the list.</summary>
         public override string ToString() => display;
     }
 
+    /// <summary>Creates the window over <paramref name="config"/>; the subclass builds the layout (see <see cref="BuildMappingsTab"/> and <see cref="BuildFooter"/>).</summary>
+    /// <param name="configStore">Where Save writes the config.</param>
+    /// <param name="config">The config as loaded.</param>
+    /// <param name="getCompanionClient">Returns the current client, for live reward and command suggestions; null for local suggestions only.</param>
     protected EventActionMappingsWindow(
         EventActionConfigStore<TConfig> configStore,
         TConfig config,
@@ -89,8 +105,10 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         SaveButton.Click += async (_, _) => await OnSaveAsync().ConfigureAwait(true);
     }
 
+    /// <summary>Builds the config to save from the window's current state: <see cref="Mappings"/> plus the subclass's own state.</summary>
     protected abstract TConfig BuildConfig();
 
+    /// <summary>Builds the context actions are described, validated and tested with (e.g. the current device list).</summary>
     protected abstract IEventActionContext BuildContext();
 
     /// <summary>
@@ -107,6 +125,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// <summary>Shows the Edit Action dialog; returns the edited action, or null if cancelled.</summary>
     protected virtual IEventAction? ShowEditActionDialog(IEventAction existing) => ShowActionEditDialog(existing);
 
+    /// <summary>Shows the Add/Edit Action dialog with this app's editors plus <see cref="DelayActionEditor"/>; returns the action, or null if cancelled.</summary>
     private IEventAction? ShowActionEditDialog(IEventAction? existing)
     {
         var editors = CreateActionEditors().Append(new DelayActionEditor()).ToList();
@@ -127,6 +146,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         return footer;
     }
 
+    /// <summary>Builds the mappings editor: the mapping list with its Add/Remove buttons, and the selected mapping's actions with Add/Edit/Remove/Test.</summary>
     protected UIElement BuildMappingsTab()
     {
         MappingsList.ItemsSource = Mappings;
@@ -204,6 +224,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     // tell it's been superseded and skip applying its (possibly stale) result out of order.
     private int _rewardTitleRefreshSequence;
 
+    /// <summary>Refreshes <see cref="RewardTitleCombo"/>'s suggestions: names already mapped straight away, then the bot's live rewards or commands once they arrive.</summary>
     protected void RefreshRewardTitleSuggestions()
     {
         // Increment unconditionally, even when there's no logged-in client below: otherwise a
@@ -283,6 +304,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         RewardTitleCombo.Text = typedTitle;
     }
 
+    /// <summary>Shows the selected mapping's actions in <see cref="ActionsList"/>, or clears it when none is selected.</summary>
     protected void RefreshActionsList()
     {
         var mapping = MappingsList.SelectedItem as EventActionMapping;
@@ -298,6 +320,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             .ToList();
     }
 
+    /// <summary>Adds a mapping for the typed name and trigger kind, or selects the existing one for it.</summary>
     private void OnAddMapping()
     {
         var title = RewardTitleCombo.Text.Trim();
@@ -322,6 +345,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         RefreshRewardTitleSuggestions();
     }
 
+    /// <summary>Removes the selected mapping.</summary>
     private void OnRemoveMapping()
     {
         if (MappingsList.SelectedItem is not EventActionMapping selected)
@@ -335,6 +359,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         RefreshActionsList();
     }
 
+    /// <summary>Adds an action, from the Add Action dialog, to the end of the selected mapping.</summary>
     private void OnAddAction()
     {
         if (MappingsList.SelectedItem is not EventActionMapping mapping)
@@ -350,6 +375,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         }
     }
 
+    /// <summary>Replaces the selected action with the Edit Action dialog's result.</summary>
     private void OnEditAction()
     {
         if (MappingsList.SelectedItem is not EventActionMapping mapping)
@@ -374,6 +400,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         }
     }
 
+    /// <summary>Removes the selected action from its mapping.</summary>
     private void OnRemoveAction()
     {
         if (MappingsList.SelectedItem is not EventActionMapping mapping)
@@ -394,6 +421,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         RefreshActionsList();
     }
 
+    /// <summary>Runs the selected mapping's actions now, as if its event had arrived, and shows each action's result.</summary>
     private async Task OnTestAsync()
     {
         if (MappingsList.SelectedItem is not EventActionMapping mapping)
@@ -435,6 +463,9 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         StatusText.Text = result.AllSucceeded ? "Test succeeded." : "Test completed with errors.";
     }
 
+    /// <summary>Replaces a mapping's actions (mappings are immutable records), keeping it selected if it was.</summary>
+    /// <param name="mapping">The mapping to update; ignored if it's no longer in <see cref="Mappings"/>.</param>
+    /// <param name="newActions">Its new actions, in order.</param>
     protected void ReplaceMappingActions(EventActionMapping mapping, List<IEventAction> newActions)
     {
         var idx = Mappings.IndexOf(mapping);
@@ -473,6 +504,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         return removedCount;
     }
 
+    /// <summary>Saves <see cref="BuildConfig"/> to the config file off the UI thread, with the window disabled so nothing can change mid-save.</summary>
     private async Task OnSaveAsync()
     {
         // Disable the whole window, not just SaveButton: BuildConfig() below snapshots the

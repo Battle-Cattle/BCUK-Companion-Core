@@ -11,13 +11,19 @@ internal sealed class TrayIconController : IDisposable
 {
     private readonly NotifyIcon _notifyIcon;
 
+    /// <summary>Raised when the user picks "Login / Account".</summary>
     public event EventHandler? OpenLoginRequested;
+    /// <summary>Raised when the user picks "Settings".</summary>
     public event EventHandler? OpenSettingsRequested;
+    /// <summary>Raised when the user picks "Exit".</summary>
     public event EventHandler? ExitRequested;
 
     /// <summary>Raised when a menu item's handler throws, with the item's label and the error.</summary>
     public event EventHandler<(string Label, Exception Error)>? MenuItemFailed;
 
+    /// <summary>Shows the tray icon with its context menu.</summary>
+    /// <param name="displayName">The icon's tooltip.</param>
+    /// <param name="additionalMenuItems">The host app's own items, shown between the built-in ones and Exit.</param>
     public TrayIconController(string displayName, IReadOnlyList<TrayMenuItem>? additionalMenuItems = null)
     {
         var menu = new ContextMenuStrip();
@@ -98,6 +104,7 @@ internal sealed class TrayIconController : IDisposable
         }
     }
 
+    /// <summary>Removes the icon from the notification area.</summary>
     public void Dispose()
     {
         _notifyIcon.Visible = false;

@@ -11,6 +11,8 @@ public sealed class SseEventReader
 {
     private readonly TextReader _reader;
 
+    /// <summary>Creates a parser over <paramref name="reader"/>, which it reads line by line.</summary>
+    /// <param name="reader">The response stream's text.</param>
     public SseEventReader(TextReader reader)
     {
         _reader = reader;
@@ -69,6 +71,7 @@ public sealed class SseEventReader
         }
     }
 
+    /// <summary>Returns a field's value: the line after <paramref name="prefix"/>, minus one leading space if present (per the SSE spec).</summary>
     private static string StripFieldPrefix(string line, string prefix)
     {
         string rest = line[prefix.Length..];

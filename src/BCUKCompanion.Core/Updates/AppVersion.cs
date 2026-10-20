@@ -54,9 +54,12 @@ public sealed record AppVersion(Version Version, bool IsPrerelease)
         return false;
     }
 
+    /// <summary>The version as text, e.g. "1.2.3".</summary>
     public override string ToString() => Version.ToString();
 
-    // Compare on major.minor.patch only: the assembly version carries a 4th (revision) part of 0
-    // while a parsed "1.2.3" leaves it undefined, and those would otherwise compare unequal.
+    /// <summary>
+    /// Compare on major.minor.patch only: the assembly version carries a 4th (revision) part of 0
+    /// while a parsed "1.2.3" leaves it undefined, and those would otherwise compare unequal.
+    /// </summary>
     private static Version Normalize(Version v) => new(v.Major, v.Minor, Math.Max(v.Build, 0));
 }

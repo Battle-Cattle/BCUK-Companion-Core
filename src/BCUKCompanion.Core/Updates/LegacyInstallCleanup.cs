@@ -31,6 +31,8 @@ public static class LegacyInstallCleanup
     public static bool Run(string installDir, string appName) =>
         RemoveListedFiles(installDir, appName) & RemoveUnlistedRuntimeFiles(installDir);
 
+    /// <summary>Deletes the files the old build's deps.json lists (see <see cref="GetStaleFiles"/>), then any locale folders left empty.</summary>
+    /// <returns>False if anything listed couldn't be deleted.</returns>
     private static bool RemoveListedFiles(string installDir, string appName)
     {
         string depsFile = Path.Combine(installDir, $"{appName}.deps.json");
@@ -69,6 +71,7 @@ public static class LegacyInstallCleanup
     public static IReadOnlyList<string> GetStaleFiles(string installDir, string appName) =>
         ExistingStaleFiles(installDir, appName, ReadDepsEntries(Path.Combine(installDir, $"{appName}.deps.json")) ?? []);
 
+    /// <summary>The files <paramref name="entries"/> name (plus each DLL's PDB and the app's own PDB) that exist, never the executable or appsettings.json.</summary>
     private static List<string> ExistingStaleFiles(
         string installDir, string appName, IEnumerable<(string? Locale, string FileName)> entries)
     {
@@ -100,11 +103,13 @@ public static class LegacyInstallCleanup
         return files.Where(File.Exists).Order(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    // Each "runtime"/"native" entry is a file in the install folder and each "resources" entry a
-    // file in its locale's subfolder; package paths such as lib/net10.0/Foo.dll are flattened on
-    // publish, so only the file name is kept. Only the target the old build ran with (its
-    // runtimeTarget) is read, and paths that are rooted or contain "." or ".." are skipped. Null
-    // if the file is missing, can't be parsed or has no such target.
+    /// <summary>
+    /// Each "runtime"/"native" entry is a file in the install folder and each "resources" entry a
+    /// file in its locale's subfolder; package paths such as lib/net10.0/Foo.dll are flattened on
+    /// publish, so only the file name is kept. Only the target the old build ran with (its
+    /// runtimeTarget) is read, and paths that are rooted or contain "." or ".." are skipped. Null
+    /// if the file is missing, can't be parsed or has no such target.
+    /// </summary>
     private static List<(string? Locale, string FileName)>? ReadDepsEntries(string depsFile)
     {
         try
@@ -125,7 +130,7 @@ public static class LegacyInstallCleanup
         }
     }
 
-    // The target named by runtimeTarget.name, or null if the file doesn't have one.
+    /// <summary>The target named by runtimeTarget.name, or null if the file doesn't have one.</summary>
     private static JsonElement? GetActiveTarget(JsonElement root)
     {
         if (GetObject(root, "runtimeTarget") is not { } runtimeTarget
@@ -138,6 +143,7 @@ public static class LegacyInstallCleanup
         return GetObject(root, "targets") is { } targets ? GetObject(targets, name.GetString()!) : null;
     }
 
+    /// <summary>The object-valued property <paramref name="propertyName"/> of <paramref name="element"/>, or null if either isn't an object.</summary>
     private static JsonElement? GetObject(JsonElement element, string propertyName) =>
         element.ValueKind == JsonValueKind.Object
         && element.TryGetProperty(propertyName, out var value)
@@ -145,6 +151,7 @@ public static class LegacyInstallCleanup
             ? value
             : null;
 
+    /// <summary>One library's runtime, native and resource files, keeping only safe paths and plain file names.</summary>
     private static IEnumerable<(string? Locale, string FileName)> ReadLibraryEntries(JsonElement library)
     {
         foreach (string kind in new[] { "runtime", "native", "resources" })
@@ -166,7 +173,7 @@ public static class LegacyInstallCleanup
         }
     }
 
-    // A resource asset's locale folder, or null if it has none that is safe to use.
+    /// <summary>A resource asset's locale folder, or null if it has none that is safe to use.</summary>
     private static string? ReadLocale(JsonElement asset) =>
         asset.ValueKind == JsonValueKind.Object
         && asset.TryGetProperty("locale", out var locale)
@@ -175,11 +182,13 @@ public static class LegacyInstallCleanup
             ? locale.GetString()
             : null;
 
+    /// <summary>The object-valued properties of <paramref name="element"/>, or none if it isn't an object.</summary>
     private static IEnumerable<JsonProperty> ObjectProperties(JsonElement element) =>
         element.ValueKind == JsonValueKind.Object
             ? element.EnumerateObject().Where(property => property.Value.ValueKind == JsonValueKind.Object)
             : [];
 
+    /// <summary>Whether a deps.json asset path is relative and has no "." or ".." segment, so it can't point outside the install folder.</summary>
     private static bool IsSafeAssetPath(string path) =>
         !Path.IsPathRooted(path)
         && path.Split('/', '\\').All(segment => segment is not "." and not "..");
@@ -187,6 +196,8 @@ public static class LegacyInstallCleanup
     // Culture names as .NET names its satellite folders: cs, zh-Hans, pt-BR, sr-Latn-RS.
     private static readonly Regex CultureFolderName = new("^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$", RegexOptions.CultureInvariant);
 
+    /// <summary>Deletes what an older build left that its deps.json doesn't list: an older runtime's <c>mscordaccore_*.dll</c> and the framework's satellite-assembly folders.</summary>
+    /// <returns>False if anything couldn't be deleted.</returns>
     private static bool RemoveUnlistedRuntimeFiles(string installDir)
     {
         try
@@ -215,9 +226,11 @@ public static class LegacyInstallCleanup
         }
     }
 
-    // A folder only the .NET build output would create: a culture name, no subfolders, and
-    // nothing but satellite assemblies. An empty one counts too, so a folder whose delete failed
-    // after its files went is retried next launch. A junction is never followed.
+    /// <summary>
+    /// A folder only the .NET build output would create: a culture name, no subfolders, and
+    /// nothing but satellite assemblies. An empty one counts too, so a folder whose delete failed
+    /// after its files went is retried next launch. A junction is never followed.
+    /// </summary>
     private static bool IsSatelliteFolder(string dir)
     {
         if (!CultureFolderName.IsMatch(Path.GetFileName(dir)) || IsReparsePoint(dir)
@@ -230,6 +243,7 @@ public static class LegacyInstallCleanup
         return files.All(f => f.EndsWith(".resources.dll", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>Whether <paramref name="dir"/> is a junction or symbolic link. Treated as one if its attributes can't be read, so it's left alone.</summary>
     private static bool IsReparsePoint(string dir)
     {
         try
@@ -242,12 +256,14 @@ public static class LegacyInstallCleanup
         }
     }
 
+    /// <summary>Whether <paramref name="name"/> is a single file or folder name: not blank, not "." or "..", and free of separators and invalid characters.</summary>
     private static bool IsPlainName(string? name) =>
         !string.IsNullOrWhiteSpace(name)
         && name is not "." and not ".."
         && name.IndexOfAny(['/', '\\', ':']) < 0
         && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
 
+    /// <summary>Deletes a file, returning false instead of throwing when it can't.</summary>
     private static bool TryDelete(string path)
     {
         try
@@ -261,7 +277,7 @@ public static class LegacyInstallCleanup
         }
     }
 
-    // True if the folder is gone; a folder that still has something in it is left alone.
+    /// <summary>True if the folder is gone; a folder that still has something in it is left alone.</summary>
     private static bool TryDeleteIfEmpty(string dir)
     {
         try

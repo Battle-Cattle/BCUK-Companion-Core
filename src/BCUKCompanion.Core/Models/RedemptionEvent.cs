@@ -11,6 +11,7 @@ namespace BCUKCompanion.Core.Models;
 /// </summary>
 public sealed class RedemptionEvent
 {
+    /// <summary>The event type: always <c>"channel_points_redemption"</c>.</summary>
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
 
@@ -21,18 +22,23 @@ public sealed class RedemptionEvent
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>The redeemed reward's Twitch ID (matches <see cref="Reward.Id"/>).</summary>
     [JsonPropertyName("rewardId")]
     public string RewardId { get; set; } = string.Empty;
 
+    /// <summary>The redeemed reward's title: what reward mappings match on.</summary>
     [JsonPropertyName("rewardTitle")]
     public string RewardTitle { get; set; } = string.Empty;
 
+    /// <summary>The viewer's Twitch login.</summary>
     [JsonPropertyName("userLogin")]
     public string UserLogin { get; set; } = string.Empty;
 
+    /// <summary>The viewer's display name.</summary>
     [JsonPropertyName("userName")]
     public string UserName { get; set; } = string.Empty;
 
+    /// <summary>Text the viewer entered, for a reward that asks for it, or null.</summary>
     [JsonPropertyName("userInput")]
     public string? UserInput { get; set; }
 
@@ -43,6 +49,7 @@ public sealed class RedemptionEvent
     [JsonPropertyName("ackRequired")]
     public bool AckRequired { get; set; }
 
+    /// <summary>When the reward was redeemed.</summary>
     [JsonPropertyName("redeemedAt")]
     public DateTimeOffset RedeemedAt { get; set; }
 

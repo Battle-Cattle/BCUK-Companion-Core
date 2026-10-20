@@ -11,6 +11,7 @@ public sealed class DelayActionEditor : EventActionEditor
 {
     private readonly TextBox delayBox = new() { Text = "5" };
 
+    /// <summary>Creates the editor with a default delay of 5 seconds.</summary>
     public DelayActionEditor()
     {
         View = new StackPanel
@@ -24,18 +25,26 @@ public sealed class DelayActionEditor : EventActionEditor
         };
     }
 
+    /// <summary>The category name in the dialog's picker.</summary>
     public override string DisplayName => "Delay";
 
+    /// <summary>The delay text box and its label.</summary>
     public override UIElement View { get; }
 
-    // Only useful between other actions, so never the default for a new action.
+    /// <summary>Only useful between other actions, so never the default for a new action.</summary>
     public override bool IsPreferredForNewAction => false;
 
+    /// <summary>True for <see cref="DelayAction"/>.</summary>
+    /// <param name="action">The action being edited.</param>
     public override bool CanEdit(IEventAction action) => action is DelayAction;
 
+    /// <summary>Shows an existing action's delay.</summary>
+    /// <param name="action">A <see cref="DelayAction"/>.</param>
     public override void Load(IEventAction action) =>
         delayBox.Text = ((DelayAction)action).DelaySeconds.ToString(CultureInfo.CurrentCulture);
 
+    /// <summary>Builds a Delay action from the text box, which must hold a whole number (its range is checked by <see cref="DelayAction.Validate"/>).</summary>
+    /// <param name="error">Why the input can't be used, when null is returned.</param>
     public override IEventAction? TryBuild(out string? error)
     {
         if (!int.TryParse(delayBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out var seconds))

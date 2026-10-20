@@ -3,8 +3,10 @@ using BCUKCompanion.TrayApp;
 
 namespace BCUKCompanion.TrayApp.Sample;
 
+/// <summary>The sample host's entry point.</summary>
 internal static class Program
 {
+    /// <summary>Runs the shared tray app with the sample's own identity and a test menu item, as a minimal per-user app would.</summary>
     [STAThread]
     private static void Main()
     {

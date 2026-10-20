@@ -17,12 +17,16 @@ public sealed class DpapiFileTokenStore : ITokenStore
     private readonly string _filePath;
     private readonly string _tempPath;
 
+    /// <summary>Creates a store that keeps the encrypted token at <paramref name="filePath"/>.</summary>
+    /// <param name="filePath">The token file's path.</param>
     public DpapiFileTokenStore(string filePath)
     {
         _filePath = filePath;
         _tempPath = filePath + ".tmp";
     }
 
+    /// <summary>Reads and decrypts the saved token.</summary>
+    /// <returns>The token, or null if none is saved or it can't be decrypted (e.g. it was saved by another Windows user).</returns>
     public string? Load()
     {
         if (!File.Exists(_filePath))

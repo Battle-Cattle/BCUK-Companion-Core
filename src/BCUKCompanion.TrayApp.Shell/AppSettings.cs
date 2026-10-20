@@ -9,8 +9,10 @@ namespace BCUKCompanion.TrayApp;
 /// </summary>
 public sealed class AppSettings
 {
+    /// <summary>The bot's base URL; must be https. Defaults to the bundled appsettings.json's <c>botHost</c>.</summary>
     public string BotHost { get; set; } = "https://bot.example.com";
 
+    /// <summary>Whether the app starts when the user signs in to Windows.</summary>
     public bool StartWithWindows { get; set; }
 
     /// <summary>
@@ -62,6 +64,7 @@ public sealed class AppSettings
         Uri.TryCreate(botHost, UriKind.Absolute, out Uri? uri)
         && uri.Scheme == Uri.UriSchemeHttps;
 
+    /// <summary>New settings with <see cref="BotHost"/> taken from the appsettings.json shipped next to the executable, when it holds a valid one.</summary>
     private static AppSettings LoadDefaultsFromBundledConfig()
     {
         var settings = new AppSettings();

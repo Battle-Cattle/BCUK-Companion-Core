@@ -19,6 +19,9 @@ public sealed class LoopbackOAuthClient
     private readonly HttpClient _httpClient;
     private readonly Uri _botHost;
 
+    /// <summary>Creates a client that logs in against <paramref name="botHost"/>.</summary>
+    /// <param name="httpClient">The client to call the bot's token endpoint with.</param>
+    /// <param name="botHost">The bot's base URL.</param>
     public LoopbackOAuthClient(HttpClient httpClient, Uri botHost)
     {
         _httpClient = httpClient;
@@ -125,6 +128,7 @@ public sealed class LoopbackOAuthClient
         return tokenElement.GetString() ?? throw new CompanionAuthException("Token exchange returned an empty token.");
     }
 
+    /// <summary>Reads the <c>error</c> field from an error response's JSON body, or null if the body isn't JSON or has none.</summary>
     private static string? TryExtractError(string body)
     {
         try

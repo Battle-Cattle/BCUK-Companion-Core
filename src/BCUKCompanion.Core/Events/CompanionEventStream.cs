@@ -36,13 +36,19 @@ public sealed class CompanionEventStream
     private readonly HashSet<string> _seenCommandEventIds = new(StringComparer.Ordinal);
     private readonly Queue<string> _seenCommandEventOrder = new();
 
-    // Test seam: how long the stream may go without receiving anything before it's treated as
-    // dead. The server pings every 25s, so 60s means two missed pings.
+    /// <summary>
+    /// Test seam: how long the stream may go without receiving anything before it's treated as
+    /// dead. The server pings every 25s, so 60s means two missed pings.
+    /// </summary>
     internal TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>Raised for each channel-point redemption, once per redemption even across reconnects.</summary>
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
+    /// <summary>Raised for each streamer activity event (follow, sub, raid, …), including ones backfilled after a reconnect.</summary>
     public event EventHandler<CompanionActivityEvent>? ActivityReceived;
+    /// <summary>Raised for each advanced command use, once per use even across reconnects.</summary>
     public event EventHandler<AdvancedCommandEvent>? AdvancedCommandReceived;
+    /// <summary>Raised whenever the connection state changes.</summary>
     public event EventHandler<CompanionConnectionState>? ConnectionStateChanged;
 
     /// <summary>
@@ -214,6 +220,7 @@ public sealed class CompanionEventStream
         }
     }
 
+    /// <summary>Restarts the idle countdown after the stream received something, ignoring a stream already torn down.</summary>
     private static void ResetIdleTimer(CancellationTokenSource idleCts, TimeSpan idleTimeout)
     {
         try
@@ -458,19 +465,24 @@ public sealed class CompanionEventStream
         return true;
     }
 
+    /// <summary>The response of GET /api/companion/events/recent, used to backfill missed activity on reconnect.</summary>
     private sealed class RecentActivityResponse
     {
+        /// <summary>Whether the request succeeded.</summary>
         [JsonPropertyName("ok")]
         public bool Ok { get; set; }
 
+        /// <summary>The missed activity events.</summary>
         [JsonPropertyName("events")]
         public List<CompanionActivityEvent>? Events { get; set; }
     }
 
+    /// <summary>Whether a redemption has every field the actions rely on; incomplete ones are dropped rather than raised.</summary>
     private static bool IsComplete(RedemptionEvent redemption) =>
         redemption.RedeemedAt != default
         && RequiredStringFields(redemption).All(field => !string.IsNullOrWhiteSpace(field));
 
+    /// <summary>The string fields a redemption must have for <see cref="IsComplete"/>.</summary>
     private static IEnumerable<string> RequiredStringFields(RedemptionEvent redemption)
     {
         yield return redemption.Type;

@@ -8,6 +8,7 @@ namespace BCUKCompanion.Core.Models;
 /// </summary>
 public sealed class AdvancedCommand
 {
+    /// <summary>The command's ID on the bot.</summary>
     [JsonPropertyName("id")]
     public int Id { get; set; }
 
@@ -19,9 +20,11 @@ public sealed class AdvancedCommand
     [JsonPropertyName("trigger")]
     public string? Trigger { get; set; }
 
+    /// <summary>What a use costs the viewer, in channel points.</summary>
     [JsonPropertyName("pointCost")]
     public int PointCost { get; set; }
 
+    /// <summary>Whether the command can currently be used.</summary>
     [JsonPropertyName("isEnabled")]
     public bool IsEnabled { get; set; }
 
@@ -29,6 +32,7 @@ public sealed class AdvancedCommand
     [JsonPropertyName("companionEnabled")]
     public bool CompanionEnabled { get; set; }
 
+    /// <summary>The command's key/value parameters, set by the streamer on the bot's web panel.</summary>
     [JsonPropertyName("parameters")]
     public Dictionary<string, string>? Parameters { get; set; }
 }

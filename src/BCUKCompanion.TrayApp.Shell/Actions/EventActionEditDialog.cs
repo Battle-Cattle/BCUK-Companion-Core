@@ -78,6 +78,7 @@ public sealed class EventActionEditDialog : Window
     /// <summary>The built action once the dialog closes with OK.</summary>
     public IEventAction? Result { get; private set; }
 
+    /// <summary>Shows only the selected category's editor, and clears any previous error.</summary>
     private void RefreshVisibility()
     {
         foreach (var editor in editors)
@@ -87,6 +88,7 @@ public sealed class EventActionEditDialog : Window
         errorText.Text = string.Empty;
     }
 
+    /// <summary>Builds and validates the action from the selected editor, closing with it in <see cref="Result"/>, or shows why it can't be used.</summary>
     private void OnOk()
     {
         if (categoryCombo.SelectedItem is not EventActionEditor editor)

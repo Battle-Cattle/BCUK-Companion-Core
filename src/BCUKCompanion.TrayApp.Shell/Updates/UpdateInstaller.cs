@@ -135,6 +135,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
         }
         """;
 
+    /// <summary>Throws <see cref="UnauthorizedAccessException"/> unless a file can be created in <paramref name="directory"/>, so an install under e.g. Program Files fails before anything is downloaded.</summary>
     private static void EnsureWritable(string directory)
     {
         string probe = Path.Combine(directory, $".update-probe-{Guid.NewGuid():N}");

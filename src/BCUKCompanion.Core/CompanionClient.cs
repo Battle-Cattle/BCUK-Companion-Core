@@ -39,8 +39,10 @@ public sealed class CompanionClient : IDisposable
     // Loops never overlap, so an event the stream raises comes from the loop using this token.
     private string? _listeningToken;
 
+    /// <summary>The live event stream: subscribe to its events before calling <see cref="StartListening"/>.</summary>
     public CompanionEventStream Events { get; }
 
+    /// <summary>Whether a companion token is saved.</summary>
     public bool IsLoggedIn => _tokenStore.Load() is not null;
 
     /// <summary>
@@ -53,12 +55,16 @@ public sealed class CompanionClient : IDisposable
     /// </summary>
     public event EventHandler<Exception>? ListenLoopFaulted;
 
-    // Test seam: lets unit tests substitute a controllable fake loop instead
-    // of the real Events.RunAsync, without standing up an HTTP server.
+    /// <summary>
+    /// Test seam: lets unit tests substitute a controllable fake loop instead
+    /// of the real Events.RunAsync, without standing up an HTTP server.
+    /// </summary>
     internal Func<string, CancellationToken, Task>? ListenLoopOverride { get; set; }
 
-    // Test seam: lets tests await "the loop has fully unwound, including any
-    // ListenLoopFaulted dispatch" deterministically, without a fixed sleep.
+    /// <summary>
+    /// Test seam: lets tests await "the loop has fully unwound, including any
+    /// ListenLoopFaulted dispatch" deterministically, without a fixed sleep.
+    /// </summary>
     internal Task CurrentLoopTask
     {
         get { lock (_lifecycleLock) { return _eventLoopTask; } }
@@ -140,6 +146,7 @@ public sealed class CompanionClient : IDisposable
     /// <param name="eventId">The event's <see cref="AdvancedCommandEvent.Id"/>.</param>
     /// <param name="ok">Whether every action succeeded.</param>
     /// <param name="error">Why not, when <paramref name="ok"/> is false.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>True if the acknowledgement resolved the use; false if the bot had already resolved it (e.g. timed out).</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
@@ -161,6 +168,7 @@ public sealed class CompanionClient : IDisposable
     /// <param name="redemptionId">The event's <see cref="RedemptionEvent.Id"/>.</param>
     /// <param name="ok">Whether every action succeeded.</param>
     /// <param name="error">Why not, when <paramref name="ok"/> is false.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>True if the acknowledgement resolved the redemption; false if the bot had already resolved it (e.g. timed out).</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
@@ -180,6 +188,7 @@ public sealed class CompanionClient : IDisposable
     /// timeout, up to a cap the bot sets.
     /// </summary>
     /// <param name="eventId">The event's <see cref="AdvancedCommandEvent.Id"/>.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>True if the timeout was restarted; false if the bot is no longer waiting for this event.</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
@@ -193,6 +202,7 @@ public sealed class CompanionClient : IDisposable
     /// <see cref="ReportCommandProgressAsync"/>.
     /// </summary>
     /// <param name="redemptionId">The event's <see cref="RedemptionEvent.Id"/>.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>True if the timeout was restarted; false if the bot is no longer waiting for this redemption.</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
@@ -281,67 +291,89 @@ public sealed class CompanionClient : IDisposable
     /// <summary>Common envelope shape (<c>{ ok, error, ... }</c>) every companion request/response API returns.</summary>
     private interface IApiEnvelope
     {
+        /// <summary>Whether the request succeeded.</summary>
         bool Ok { get; }
 
+        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
         string? Error { get; }
     }
 
+    /// <summary>The response of GET /api/companion/events/recent.</summary>
     private sealed class RecentActivityResponse : IApiEnvelope
     {
+        /// <summary>Whether the request succeeded.</summary>
         [JsonPropertyName("ok")]
         public bool Ok { get; set; }
 
+        /// <summary>The missed activity events.</summary>
         [JsonPropertyName("events")]
         public List<CompanionActivityEvent>? Events { get; set; }
 
+        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
         [JsonPropertyName("error")]
         public string? Error { get; set; }
     }
 
+    /// <summary>The response of GET /api/companion/rewards.</summary>
     private sealed class RewardsResponse : IApiEnvelope
     {
+        /// <summary>Whether the request succeeded.</summary>
         [JsonPropertyName("ok")]
         public bool Ok { get; set; }
 
+        /// <summary>The channel's custom rewards.</summary>
         [JsonPropertyName("rewards")]
         public List<Reward>? Rewards { get; set; }
 
+        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
         [JsonPropertyName("error")]
         public string? Error { get; set; }
     }
 
+    /// <summary>The response of GET /api/companion/commands.</summary>
     private sealed class CommandsResponse : IApiEnvelope
     {
+        /// <summary>Whether the request succeeded.</summary>
         [JsonPropertyName("ok")]
         public bool Ok { get; set; }
 
+        /// <summary>The streamer's advanced commands.</summary>
         [JsonPropertyName("commands")]
         public List<AdvancedCommand>? Commands { get; set; }
 
+        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
         [JsonPropertyName("error")]
         public string? Error { get; set; }
     }
 
+    /// <summary>The response of the command and redemption ack routes.</summary>
     private sealed class AckResponse : IApiEnvelope
     {
+        /// <summary>Whether the request succeeded.</summary>
         [JsonPropertyName("ok")]
         public bool Ok { get; set; }
 
+        /// <summary>Whether this acknowledgement resolved the event (false if the bot already had, e.g. on timeout).</summary>
         [JsonPropertyName("resolved")]
         public bool Resolved { get; set; }
 
+        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
         [JsonPropertyName("error")]
         public string? Error { get; set; }
     }
 
+    /// <summary>The response of the command and redemption progress routes.</summary>
     private sealed class ProgressResponse : IApiEnvelope
     {
+        /// <summary>Whether the request succeeded.</summary>
         [JsonPropertyName("ok")]
         public bool Ok { get; set; }
 
+        /// <summary>Whether the bot restarted its acknowledgement timeout.</summary>
         [JsonPropertyName("extended")]
         public bool Extended { get; set; }
 
+        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
         [JsonPropertyName("error")]
         public string? Error { get; set; }
     }
@@ -518,6 +550,7 @@ public sealed class CompanionClient : IDisposable
         return _eventLoopTask;
     }
 
+    /// <summary>Waits for the previous listen loop to unwind, then runs the next one with <paramref name="token"/> until it's canceled or fails. A failure is raised as <see cref="ListenLoopFaulted"/>.</summary>
     private async Task RunAfterPreviousAsync(Task previousLoop, string token, CancellationTokenSource cts)
     {
         try
@@ -574,6 +607,7 @@ public sealed class CompanionClient : IDisposable
         }
     }
 
+    /// <summary>Stops listening and disposes the HTTP client if this instance created it.</summary>
     public void Dispose()
     {
         StopListening();

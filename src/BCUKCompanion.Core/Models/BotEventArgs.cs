@@ -11,4 +11,5 @@ namespace BCUKCompanion.Core.Models;
 /// <paramref name="Metadata"/> so consumers can branch on <see cref="EventName"/> reliably
 /// as Core grows more event kinds.
 /// </param>
+/// <param name="Metadata">The event's details by key (e.g. <c>rewardTitle</c>, <c>commandName</c>); a value is null when the event has no value for it.</param>
 public sealed record BotEventArgs(string EventName, IReadOnlyDictionary<string, string?> Metadata);
