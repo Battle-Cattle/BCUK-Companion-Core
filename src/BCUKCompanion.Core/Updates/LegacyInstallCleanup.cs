@@ -24,7 +24,7 @@ public static class LegacyInstallCleanup
 {
     /// <summary>
     /// Deletes the stale files in <paramref name="installDir"/>. Never throws for a file it can't
-    /// delete or a deps.json it can't read; returns false if anything was left behind.
+    /// delete or a deps.json it can't read; returns false if a cleanup step it attempted fails.
     /// </summary>
     /// <param name="installDir">The folder the running executable is in.</param>
     /// <param name="appName">The executable's name without <c>.exe</c>, e.g. <c>MyApp</c>.</param>

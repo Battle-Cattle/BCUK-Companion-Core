@@ -37,7 +37,7 @@ public sealed class AppSettings
     /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
     /// missing, unreadable or has an invalid bot host.
     /// </summary>
-    /// <returns>The saved settings, or defaults when they can't be used; never null. A bundled appsettings.json whose root isn't a JSON object, or whose <c>botHost</c> isn't a string, throws <see cref="InvalidOperationException"/>.</returns>
+    /// <returns>The saved settings, or defaults when they can't be used; never null. A bundled appsettings.json whose root isn't a JSON object, or whose <c>botHost</c> is neither a string nor JSON null, throws <see cref="InvalidOperationException"/>.</returns>
     public static AppSettings Load()
     {
         try
@@ -70,7 +70,7 @@ public sealed class AppSettings
         && uri.Scheme == Uri.UriSchemeHttps;
 
     /// <summary>New settings with <see cref="BotHost"/> taken from the appsettings.json shipped next to the executable, when it holds a valid one.</summary>
-    /// <returns>New settings; <see cref="BotHost"/> keeps its hard-coded default if the bundled file is missing, unreadable, not valid JSON, or has no https <c>botHost</c> string. A JSON root that isn't an object, or a <c>botHost</c> that isn't a string, throws <see cref="InvalidOperationException"/>.</returns>
+    /// <returns>New settings; <see cref="BotHost"/> keeps its hard-coded default if the bundled file is missing, unreadable, not valid JSON, or has no https <c>botHost</c> string. A JSON root that isn't an object, or a <c>botHost</c> that's neither a string nor JSON null, throws <see cref="InvalidOperationException"/>.</returns>
     private static AppSettings LoadDefaultsFromBundledConfig()
     {
         var settings = new AppSettings();
