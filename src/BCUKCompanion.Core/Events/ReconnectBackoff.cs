@@ -12,7 +12,7 @@ public static class ReconnectBackoff
     private const double JitterFraction = 0.2;
 
     /// <param name="attempt">0-based reconnect attempt number.</param>
-    /// <returns>How long to wait before the attempt: 2^<paramref name="attempt"/> seconds &#177;20% jitter, capped at 30 seconds.</returns>
+    /// <returns>How long to wait before the attempt: 2^<paramref name="attempt"/> seconds &#177;20% jitter, capped at 30 seconds; a negative attempt counts as 0.</returns>
     public static TimeSpan GetDelay(int attempt) => GetDelay(attempt, null);
 
     /// <param name="attempt">0-based reconnect attempt number.</param>

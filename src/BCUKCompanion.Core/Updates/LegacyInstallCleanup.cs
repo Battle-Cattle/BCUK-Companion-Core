@@ -28,14 +28,14 @@ public static class LegacyInstallCleanup
     /// </summary>
     /// <param name="installDir">The folder the running executable is in.</param>
     /// <param name="appName">The executable's name without <c>.exe</c>, e.g. <c>MyApp</c>.</param>
-    /// <returns>True if nothing stale is left; false if something couldn't be deleted (and is retried next launch).</returns>
+    /// <returns>True if nothing stale is left that the cleanup could see; false if something couldn't be deleted (and is retried next launch). A deps.json that <see cref="File.Exists(string)"/> can't see (e.g. access is denied) counts as absent, so its listed files aren't removed and true can still be returned.</returns>
     public static bool Run(string installDir, string appName) =>
         RemoveListedFiles(installDir, appName) & RemoveUnlistedRuntimeFiles(installDir);
 
     /// <summary>Deletes the files the old build's deps.json lists (see <see cref="GetStaleFiles"/>), then any locale folders left empty.</summary>
     /// <param name="installDir">The folder the running executable is in.</param>
     /// <param name="appName">The executable's name without <c>.exe</c>, which names its deps.json.</param>
-    /// <returns>False if anything listed couldn't be deleted.</returns>
+    /// <returns>False if anything listed couldn't be deleted; true when everything listed is gone or there's no deps.json that <see cref="File.Exists(string)"/> can see.</returns>
     private static bool RemoveListedFiles(string installDir, string appName)
     {
         string depsFile = Path.Combine(installDir, $"{appName}.deps.json");

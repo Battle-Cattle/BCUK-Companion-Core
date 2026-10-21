@@ -69,7 +69,7 @@ public sealed class GitHubReleaseUpdateChecker
     /// and carries a matching zip, otherwise <c>null</c>. Network and API errors propagate.
     /// </summary>
     /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>A task whose result is the newer release's details, or null when there's no release, it isn't newer, it has no matching zip, or one of its URLs isn't https.</returns>
+    /// <returns>A task whose result is the newer release's details, or null when there's no release, it isn't newer, it has no matching zip, or its zip's or checksum's download URL isn't https. A non-https release page URL is replaced with the repo's releases page instead.</returns>
     public async Task<AvailableUpdate?> CheckForUpdateAsync(CancellationToken cancellationToken = default)
     {
         var latestReleaseUrl = new Uri($"https://api.github.com/repos/{repoOwner}/{repoName}/releases/latest");
@@ -205,7 +205,7 @@ public sealed class GitHubReleaseUpdateChecker
     /// <param name="filePath">The full path of the downloaded file to hash.</param>
     /// <param name="checksumText">The checksum file's contents; only its first whitespace-separated token is used.</param>
     /// <param name="cancellationToken">Cancels hashing the file.</param>
-    /// <returns>A task that completes when the file matches; it faults with <see cref="InvalidDataException"/> otherwise.</returns>
+    /// <returns>A task that completes when the file matches; it faults with <see cref="InvalidDataException"/> when the checksum is malformed or doesn't match. Errors opening or reading the file propagate as they are.</returns>
     public static async Task VerifySha256Async(string filePath, string checksumText, CancellationToken cancellationToken = default)
     {
         var expected = checksumText.Trim().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();

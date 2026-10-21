@@ -26,7 +26,7 @@ public sealed class DpapiFileTokenStore : ITokenStore
     }
 
     /// <summary>Reads and decrypts the saved token.</summary>
-    /// <returns>The token, or null if none is saved or it can't be decrypted (e.g. it was saved by another Windows user).</returns>
+    /// <returns>The token, or null if none is saved or it can't be decrypted (e.g. it was saved by another Windows user). An I/O or access error reading the file propagates.</returns>
     public string? Load()
     {
         if (!File.Exists(_filePath))
