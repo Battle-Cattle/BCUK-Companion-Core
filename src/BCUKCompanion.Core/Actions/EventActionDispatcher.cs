@@ -25,6 +25,8 @@ public sealed class EventActionDispatcher(
     /// (by its <c>commandName</c>). The event itself is available to the actions as
     /// <c>context.GetService&lt;BotEventArgs&gt;()</c>.
     /// </summary>
+    /// <param name="botEvent">The event received from the bot; its <c>rewardTitle</c> or <c>commandName</c> metadata picks the mappings.</param>
+    /// <param name="cancellationToken">Passed to each action; an action that observes it stops the run by throwing, and that cancellation propagates. The dispatcher doesn't check it between actions.</param>
     /// <returns>The per-action results, or null if the event isn't one mappings apply to.</returns>
     public async Task<EventDispatchResult?> DispatchAsync(BotEventArgs botEvent, CancellationToken cancellationToken = default)
     {
@@ -43,6 +45,9 @@ public sealed class EventActionDispatcher(
     }
 
     /// <summary>Runs the actions mapped to a reward title (e.g. a settings window's Test button).</summary>
+    /// <param name="rewardTitle">The reward title to match, case-insensitively, against reward mappings.</param>
+    /// <param name="cancellationToken">Passed to each action; an action that observes it stops the run by throwing, and that cancellation propagates. The dispatcher doesn't check it between actions.</param>
+    /// <returns>A task whose result holds one result per action run; empty when nothing is mapped to the title.</returns>
     public Task<EventDispatchResult> DispatchAsync(string rewardTitle, CancellationToken cancellationToken = default)
         => DispatchAsync(rewardTitle, EventActionTriggerKind.Reward, null, cancellationToken);
 
@@ -50,7 +55,8 @@ public sealed class EventActionDispatcher(
     /// <param name="name">The reward title or command name, matched case-insensitively.</param>
     /// <param name="kind">Which kind of mapping to match.</param>
     /// <param name="botEvent">The event being dispatched, exposed to actions; null for a test run.</param>
-    /// <param name="cancellationToken">Cancels the remaining actions.</param>
+    /// <param name="cancellationToken">Passed to each action; an action that observes it stops the run by throwing, and that cancellation propagates. The dispatcher doesn't check it between actions.</param>
+    /// <returns>A task whose result holds one result per action run, in order; empty when nothing matches.</returns>
     public async Task<EventDispatchResult> DispatchAsync(
         string name, EventActionTriggerKind kind, BotEventArgs? botEvent = null, CancellationToken cancellationToken = default)
     {
@@ -79,6 +85,10 @@ public sealed class EventActionDispatcher(
     }
 
     /// <summary>Validates and runs one action, turning a validation failure or an exception into a failed result. Only the caller's own cancellation propagates.</summary>
+    /// <param name="action">The action to validate and run.</param>
+    /// <param name="context">The services the action can ask for.</param>
+    /// <param name="cancellationToken">The caller's cancellation; its cancellation is rethrown rather than reported as a failure.</param>
+    /// <returns>A task whose result says whether the action succeeded and, if not, why.</returns>
     private static async Task<EventActionResult> ExecuteActionAsync(
         IEventAction action, IEventActionContext context, CancellationToken cancellationToken)
     {

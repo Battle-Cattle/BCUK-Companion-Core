@@ -91,6 +91,9 @@ public sealed class CompanionEventStream
     /// Runs the connect/read/reconnect loop until <paramref name="cancellationToken"/>
     /// is canceled or the server reports the token is invalid/revoked (401).
     /// </summary>
+    /// <param name="token">The companion bearer token to connect with.</param>
+    /// <param name="cancellationToken">Stops the loop, closing any open connection.</param>
+    /// <returns>A task that completes when the loop is canceled or the token is rejected.</returns>
     public async Task RunAsync(string token, CancellationToken cancellationToken = default)
     {
         int attempt = 0;
@@ -126,6 +129,9 @@ public sealed class CompanionEventStream
     }
 
     /// <summary>Connects once. ShouldStop is true if the caller should stop retrying (auth failure).</summary>
+    /// <param name="token">The companion bearer token to connect with.</param>
+    /// <param name="cancellationToken">The caller's cancellation; a cancel also ends the connection.</param>
+    /// <returns>A task whose result says whether to stop retrying (a 401) and whether the stream connected successfully before it ended, which resets the backoff.</returns>
     private async Task<(bool ShouldStop, bool WasConnected)> ConnectOnceAsync(string token, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/events");
@@ -221,6 +227,8 @@ public sealed class CompanionEventStream
     }
 
     /// <summary>Restarts the idle countdown after the stream received something, ignoring a stream already torn down.</summary>
+    /// <param name="idleCts">The source canceled when the connection has been idle too long.</param>
+    /// <param name="idleTimeout">How long the connection may go without receiving anything.</param>
     private static void ResetIdleTimer(CancellationTokenSource idleCts, TimeSpan idleTimeout)
     {
         try
@@ -241,6 +249,9 @@ public sealed class CompanionEventStream
     /// records not already delivered (see <see cref="MarkSeen"/>). Errors are
     /// swallowed — this must never fail the connection attempt itself.
     /// </summary>
+    /// <param name="token">The companion bearer token to authenticate with.</param>
+    /// <param name="cancellationToken">Cancels the request; the only failure that isn't swallowed.</param>
+    /// <returns>A task that completes once any new activity has been dispatched.</returns>
     private async Task FetchRecentActivityAsync(string token, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/events/recent");
@@ -294,6 +305,7 @@ public sealed class CompanionEventStream
     }
 
     /// <summary>Routes one SSE frame to the redemption, activity or advanced-command handler by its <c>type</c>.</summary>
+    /// <param name="sseEvent">The SSE frame read from the stream; its data is JSON with a <c>type</c> field.</param>
     private void HandleEvent(SseEvent sseEvent)
     {
         if (string.IsNullOrWhiteSpace(sseEvent.Data))
@@ -327,6 +339,7 @@ public sealed class CompanionEventStream
     /// Parses a live activity frame and dispatches it if it's valid and newer than anything
     /// already delivered.
     /// </summary>
+    /// <param name="data">The frame's JSON data.</param>
     private void HandleActivityEvent(string data)
     {
         CompanionActivityEvent? activity;
@@ -358,6 +371,8 @@ public sealed class CompanionEventStream
     /// Whether an activity (live or from the catch-up) has a known type, a display name, a
     /// timestamp and a positive id; anything else is dropped rather than shown.
     /// </summary>
+    /// <param name="activity">The parsed activity, or null if the JSON held <c>null</c>.</param>
+    /// <returns>True when the activity has every field it needs to be shown.</returns>
     private static bool IsValidActivity(CompanionActivityEvent? activity)
     {
         if (activity is null)
@@ -380,6 +395,8 @@ public sealed class CompanionEventStream
     /// <see cref="ActivityReceived"/> when this returns true, so the same activity arriving via
     /// both paths (the backfill request races the live SSE connection) is only delivered once.
     /// </summary>
+    /// <param name="activity">The activity to record.</param>
+    /// <returns>True if its id is newer than the high-water mark (which now moves to it); false if it was already delivered.</returns>
     private bool MarkSeen(CompanionActivityEvent activity)
     {
         if (activity.Id <= _lastActivityEventId)
@@ -397,6 +414,7 @@ public sealed class CompanionEventStream
     /// from the second event has always been handed the activity first: if the process exits in
     /// between, the next run shows the activity again rather than skipping one never shown.
     /// </summary>
+    /// <param name="activity">The newly seen activity.</param>
     private void DispatchActivity(CompanionActivityEvent activity)
     {
         ActivityReceived?.Invoke(this, activity);
@@ -404,6 +422,7 @@ public sealed class CompanionEventStream
     }
 
     /// <summary>Parses a channel-point redemption frame and raises <see cref="RedemptionReceived"/> if it's complete.</summary>
+    /// <param name="data">The frame's JSON data.</param>
     private void HandleRedemptionEvent(string data)
     {
         RedemptionEvent? redemption;
@@ -423,6 +442,7 @@ public sealed class CompanionEventStream
     }
 
     /// <summary>Parses an <c>advanced_command</c> frame and raises <see cref="AdvancedCommandReceived"/> once per complete, unseen event.</summary>
+    /// <param name="data">The frame's JSON data.</param>
     private void HandleAdvancedCommandEvent(string data)
     {
         AdvancedCommandEvent? command;
@@ -442,6 +462,8 @@ public sealed class CompanionEventStream
     }
 
     /// <summary>Whether an advanced command event has the fields a handler relies on (id, name, a known source, a timestamp).</summary>
+    /// <param name="command">The parsed advanced command event.</param>
+    /// <returns>True when the event has every required field and a source of <c>chat</c> or <c>streamdeck</c>.</returns>
     private static bool IsComplete(AdvancedCommandEvent command) =>
         !string.IsNullOrWhiteSpace(command.Id)
         && !string.IsNullOrWhiteSpace(command.CommandName)
@@ -449,6 +471,8 @@ public sealed class CompanionEventStream
         && command.TriggeredAt != default;
 
     /// <summary>Records an advanced command event id, returning false if it was already delivered.</summary>
+    /// <param name="eventId">The event's <see cref="AdvancedCommandEvent.Id"/>.</param>
+    /// <returns>True if the id is new (it's now remembered); false if it was already delivered.</returns>
     private bool MarkCommandSeen(string eventId)
     {
         if (!_seenCommandEventIds.Add(eventId))
@@ -478,11 +502,15 @@ public sealed class CompanionEventStream
     }
 
     /// <summary>Whether a redemption has every field the actions rely on; incomplete ones are dropped rather than raised.</summary>
+    /// <param name="redemption">The parsed redemption event.</param>
+    /// <returns>True when the redemption has a timestamp and every required string field is non-blank.</returns>
     private static bool IsComplete(RedemptionEvent redemption) =>
         redemption.RedeemedAt != default
         && RequiredStringFields(redemption).All(field => !string.IsNullOrWhiteSpace(field));
 
     /// <summary>The string fields a redemption must have for <see cref="IsComplete(RedemptionEvent)"/>.</summary>
+    /// <param name="redemption">The redemption to read the fields from.</param>
+    /// <returns>The type, reward id, reward title, user login and user name, in that order.</returns>
     private static IEnumerable<string> RequiredStringFields(RedemptionEvent redemption)
     {
         yield return redemption.Type;

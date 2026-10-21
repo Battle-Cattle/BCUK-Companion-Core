@@ -34,12 +34,19 @@ public sealed class UnrecognizedEventAction : IEventAction
     public string Reason { get; }
 
     /// <summary>Shows the action as unrecognized, with its saved kind when it has one.</summary>
+    /// <param name="context">Unused: the description needs no live state.</param>
+    /// <returns>"Unrecognized action", followed by the saved kind in parentheses when there is one.</returns>
     public string Describe(IEventActionContext context) =>
         string.IsNullOrEmpty(Kind) ? "Unrecognized action" : $"Unrecognized action ({Kind})";
 
     /// <summary>Always fails with <see cref="Reason"/>, so the action is never run.</summary>
+    /// <param name="context">Unused: the check needs no live state.</param>
+    /// <returns>A single error: <see cref="Reason"/>.</returns>
     public IReadOnlyList<string> Validate(IEventActionContext context) => [Reason];
 
     /// <summary>Never reached (<see cref="Validate"/> always fails); reports failure if called directly.</summary>
+    /// <param name="context">Unused.</param>
+    /// <param name="cancellationToken">Unused.</param>
+    /// <returns>A completed task whose result is always false.</returns>
     public Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken) => Task.FromResult(false);
 }

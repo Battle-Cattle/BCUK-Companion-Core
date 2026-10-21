@@ -45,6 +45,8 @@ internal sealed class BotEventHandler
     /// failure there cancels the redemption and refunds the viewer. While those actions run, the
     /// bot gets a progress ping every minute so long actions aren't refunded mid-run.
     /// </summary>
+    /// <param name="client">The client the redemption arrived on, which its progress pings and acknowledgement go through.</param>
+    /// <param name="redemption">The channel-point redemption to handle.</param>
     public void OnRedemption(CompanionClient client, RedemptionEvent redemption)
     {
         _ = _runOnUiThread(async () =>
@@ -81,6 +83,7 @@ internal sealed class BotEventHandler
     /// UI thread ahead of the tray app's save of its activity id, so the id is only saved once
     /// the activity has been handled.
     /// </summary>
+    /// <param name="activity">The follow/sub/raid/... event to announce and hand on.</param>
     public void OnActivity(CompanionActivityEvent activity)
     {
         _ = _runOnUiThread(async () =>
@@ -109,6 +112,8 @@ internal sealed class BotEventHandler
     /// a failure there refunds the viewer. While its actions run, the bot gets a progress ping every
     /// minute so long actions aren't refunded mid-run.
     /// </summary>
+    /// <param name="client">The client the command arrived on, which its progress pings and acknowledgement go through.</param>
+    /// <param name="command">The advanced command event to handle.</param>
     public void OnAdvancedCommand(CompanionClient client, AdvancedCommandEvent command)
     {
         _ = _runOnUiThread(async () =>
@@ -137,6 +142,8 @@ internal sealed class BotEventHandler
     /// the viewer once its acknowledgement timeout passes, which is the right outcome when we
     /// can't say the actions ran.
     /// </summary>
+    /// <param name="sendAck">Sends the acknowledgement; its result is ignored.</param>
+    /// <returns>A task that completes once the acknowledgement is sent or has failed; it never faults.</returns>
     private static async Task TrySendAckAsync(Func<Task<bool>> sendAck)
     {
         try
@@ -157,6 +164,8 @@ internal sealed class BotEventHandler
     /// actions, with a balloon for any that fail. Returns the acknowledgement an advanced command
     /// or a confirmation-required redemption should send; the other events ignore it.
     /// </summary>
+    /// <param name="botEvent">The event to hand to the host and the dispatcher.</param>
+    /// <returns>A task that completes with whether the event was handled successfully, and the error to report when it wasn't; it never faults.</returns>
     private async Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent)
     {
         try
@@ -230,6 +239,7 @@ internal sealed class BotEventHandler
     /// Surfaces actions that ran but failed (a wrong device IP, an offline device, ...) as a
     /// balloon, since Debug output is compiled out of a Release build.
     /// </summary>
+    /// <param name="result">The dispatch result, or null when nothing was dispatched; no balloon unless it has a failure summary.</param>
     private void ReportFailedActions(EventDispatchResult? result)
     {
         if (result?.FailureSummary is { } detail)
@@ -242,6 +252,8 @@ internal sealed class BotEventHandler
     /// The <c>command.triggered</c> event handed to the host. Each command parameter is added as
     /// <c>param.&lt;key&gt;</c>, so actions can read them from the event's metadata.
     /// </summary>
+    /// <param name="command">The advanced command event the bot sent.</param>
+    /// <returns>The event args, named <see cref="EventActionDispatcher.CommandEventName"/>, with the command's fields and parameters as metadata.</returns>
     private static BotEventArgs BuildCommandEventArgs(AdvancedCommandEvent command)
     {
         var metadata = new Dictionary<string, string?>

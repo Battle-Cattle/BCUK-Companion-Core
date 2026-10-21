@@ -42,6 +42,10 @@ public static class AckProgressPinger
     /// Sends <paramref name="ping"/> every <paramref name="interval"/> until <paramref name="cancellationToken"/>
     /// is canceled, the bot stops extending its timeout, or it answers 404; other failures are ignored.
     /// </summary>
+    /// <param name="ping">Sends one progress ping and returns whether the bot extended its timeout.</param>
+    /// <param name="interval">Time to wait before each ping.</param>
+    /// <param name="cancellationToken">Canceled once the work finishes, which stops pinging.</param>
+    /// <returns>A task that completes when pinging stops; it never faults.</returns>
     private static async Task PingUntilCanceledAsync(Func<CancellationToken, Task<bool>> ping, TimeSpan interval, CancellationToken cancellationToken)
     {
         while (true)

@@ -70,6 +70,10 @@ public sealed class CompanionClient : IDisposable
         get { lock (_lifecycleLock) { return _eventLoopTask; } }
     }
 
+    /// <summary>Creates a client for the bot at <paramref name="botHost"/>; nothing connects until a method is called.</summary>
+    /// <param name="botHost">The bot's base URL; must be absolute HTTPS.</param>
+    /// <param name="tokenStore">Where the companion token is saved and loaded.</param>
+    /// <param name="httpClient">The client to call the bot with; when null, one is created and disposed with this instance.</param>
     /// <exception cref="ArgumentException"><paramref name="botHost"/> is not an HTTPS URL.</exception>
     public CompanionClient(Uri botHost, ITokenStore tokenStore, HttpClient? httpClient = null)
     {
@@ -94,6 +98,8 @@ public sealed class CompanionClient : IDisposable
     /// it's meant for app-start or occasional refreshes, not real-time updates (use
     /// <see cref="Events"/> for that).
     /// </summary>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is every custom reward, paused ones included; empty when the bot returns none.</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
@@ -111,6 +117,8 @@ public sealed class CompanionClient : IDisposable
     /// one-off catch-up call; <see cref="Events"/> already backfills this automatically
     /// on every (re)connect, so most callers won't need to call this directly.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is the recent activity events the bot returned; empty when there are none.</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
@@ -127,6 +135,8 @@ public sealed class CompanionClient : IDisposable
     /// offer command names when mapping a command to actions. An empty list when the logged-in
     /// user isn't a streamer.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is the streamer's advanced commands; empty when there are none or the user isn't a streamer.</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
@@ -211,6 +221,11 @@ public sealed class CompanionClient : IDisposable
         => ReportProgressAsync("/api/companion/rewards/progress", redemptionId, "Reporting redemption progress", cancellationToken);
 
     /// <summary>POSTs <c>{ eventId }</c> to a progress route and returns the bot's <c>extended</c> flag.</summary>
+    /// <param name="path">The bot's progress route, e.g. <c>/api/companion/commands/progress</c>.</param>
+    /// <param name="eventId">The ID of the event whose actions are still running.</param>
+    /// <param name="operationDescription">Names the request in error messages, e.g. "Reporting command progress".</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is true if the bot restarted its acknowledgement timeout; false if it's no longer waiting for the event.</returns>
     private async Task<bool> ReportProgressAsync(string path, string eventId, string operationDescription, CancellationToken cancellationToken)
     {
         var body = JsonSerializer.Serialize(new { eventId });
@@ -227,6 +242,10 @@ public sealed class CompanionClient : IDisposable
     /// <see cref="IApiEnvelope.Error"/> envelope, checked here so an HTTP 200 the server marked
     /// <c>ok: false</c> throws instead of silently looking like an empty/absent result.
     /// </summary>
+    /// <param name="path">The companion API path, relative to the bot host.</param>
+    /// <param name="operationDescription">Names the request in error messages, e.g. "Fetching rewards".</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status, an unparseable body, or an <c>ok: false</c> envelope.</exception>
@@ -238,6 +257,12 @@ public sealed class CompanionClient : IDisposable
     /// Sends an authenticated request (with an optional JSON body) to a companion API path and
     /// checks its envelope — see <see cref="FetchAsync{TResponse}"/>.
     /// </summary>
+    /// <param name="method">The HTTP method to send.</param>
+    /// <param name="path">The companion API path, relative to the bot host.</param>
+    /// <param name="jsonBody">The JSON request body, or null to send none.</param>
+    /// <param name="operationDescription">Names the request in error messages, e.g. "Acknowledging command".</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
     private async Task<TResponse> SendAsync<TResponse>(
         HttpMethod method, string path, string? jsonBody, string operationDescription, CancellationToken cancellationToken)
         where TResponse : class, IApiEnvelope
@@ -379,6 +404,9 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>Runs the loopback OAuth login flow (Option A) and saves the resulting token.</summary>
+    /// <param name="openBrowser">Opens the given login URL in the user's browser.</param>
+    /// <param name="cancellationToken">Cancels the login.</param>
+    /// <returns>A task that completes once the issued token has been saved.</returns>
     public async Task LoginWithBrowserAsync(Func<Uri, Task> openBrowser, CancellationToken cancellationToken = default)
     {
         string token = await _oauthClient.LoginAsync(openBrowser, cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -389,6 +417,7 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>Saves a token the user pasted in from the dashboard's manual-token page (Option B).</summary>
+    /// <param name="token">The bearer token the user pasted; must not be blank.</param>
     public void SetManualToken(string token)
     {
         if (string.IsNullOrWhiteSpace(token))
@@ -456,6 +485,7 @@ public sealed class CompanionClient : IDisposable
     /// rather than from the returned task. Revoking is best-effort: its failure (offline, a bot
     /// that predates the endpoint) only leaves the token valid on the bot, as <see cref="Logout"/> does.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the revoke request.</param>
     /// <returns>Whether there was a token, and whether the bot confirmed it no longer works.</returns>
     /// <exception cref="IOException">The token file couldn't be read or deleted.</exception>
     /// <exception cref="UnauthorizedAccessException">The token file couldn't be read or deleted.</exception>
@@ -472,6 +502,9 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>Asks the bot to revoke <paramref name="token"/>, giving up after <see cref="RevokeTimeout"/>.</summary>
+    /// <param name="token">The bearer token to revoke, sent as the request's own credentials.</param>
+    /// <param name="cancellationToken">Cancels the revoke request.</param>
+    /// <returns>A task whose result is <see cref="LogoutResult.Revoked"/> when the bot confirmed it (or answered 401), otherwise <see cref="LogoutResult.NotConfirmed"/>.</returns>
     private async Task<LogoutResult> RevokeAsync(string token, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -543,6 +576,7 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>Must be called while holding <see cref="_lifecycleLock"/>.</summary>
+    /// <returns>The task of the loop just canceled, or a completed task when none was running.</returns>
     private Task CancelCurrentLoopLocked()
     {
         _eventLoopCts?.Cancel();
@@ -551,6 +585,10 @@ public sealed class CompanionClient : IDisposable
     }
 
     /// <summary>Waits for the previous listen loop to unwind, then runs the next one with <paramref name="token"/> until it's canceled or fails. A failure is raised as <see cref="ListenLoopFaulted"/>.</summary>
+    /// <param name="previousLoop">The previous listen loop's task, awaited (ignoring its failure) before the new loop starts.</param>
+    /// <param name="token">The bearer token to connect the event stream with.</param>
+    /// <param name="cts">This loop's cancellation source; disposed when the loop ends.</param>
+    /// <returns>A task that completes when this loop has been canceled or has failed; it never faults.</returns>
     private async Task RunAfterPreviousAsync(Task previousLoop, string token, CancellationTokenSource cts)
     {
         try

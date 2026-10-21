@@ -10,6 +10,7 @@ internal static class AutoStartService
     private static string _valueName = "BCUKCompanion";
 
     /// <summary>Sets the Run-key value name (the app's data folder name, so apps don't overwrite each other's entry); call once at startup.</summary>
+    /// <param name="valueName">The registry value name under the current user's Run key.</param>
     public static void Configure(string valueName) => _valueName = valueName;
 
     /// <summary>Adds or removes the current user's Run-key entry, which starts the app minimized at sign-in.</summary>
@@ -33,6 +34,7 @@ internal static class AutoStartService
     }
 
     /// <summary>Whether the current user's Run key has this app's entry.</summary>
+    /// <returns>True when the entry exists; false when it or the Run key is missing.</returns>
     public static bool IsEnabled()
     {
         using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);

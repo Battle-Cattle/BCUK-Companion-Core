@@ -54,12 +54,17 @@ internal sealed class TrayIconController : IDisposable
     }
 
     /// <summary>Adds a menu item whose click runs <paramref name="onClick"/> through <see cref="RunSafely"/>.</summary>
+    /// <param name="menu">The context menu to add the item to.</param>
+    /// <param name="label">The item's text, also reported if its action fails.</param>
+    /// <param name="onClick">What the item does when clicked.</param>
     private void AddItem(ContextMenuStrip menu, string label, Action onClick) =>
         menu.Items.Add(label, null, (_, _) => RunSafely(label, onClick));
 
     // A menu click runs on the WinForms message loop, where an escaping exception would bring up
     // WinForms' crash dialog: report it through MenuItemFailed instead and keep the tray running.
     /// <summary>Runs a menu item's action, raising <see cref="MenuItemFailed"/> instead of letting an exception escape.</summary>
+    /// <param name="label">The menu item's text, passed to <see cref="MenuItemFailed"/> on failure.</param>
+    /// <param name="action">The item's action.</param>
     private void RunSafely(string label, Action action)
     {
         try
@@ -76,6 +81,8 @@ internal sealed class TrayIconController : IDisposable
     /// Shows "&lt;displayName&gt; — &lt;status&gt;" as the tooltip. NotifyIcon.Text is limited to 63
     /// characters, so a long display name is shortened rather than the status cut off.
     /// </summary>
+    /// <param name="displayName">The app's name, truncated if needed.</param>
+    /// <param name="status">The connection status text, e.g. "Connected".</param>
     public void SetStatus(string displayName, string status)
     {
         const int maxLength = 63;
@@ -90,6 +97,8 @@ internal sealed class TrayIconController : IDisposable
     /// ShowBalloonTip rejects empty text (e.g. an activity with no display name or detail),
     /// so that falls back to the title.
     /// </summary>
+    /// <param name="title">The balloon's title.</param>
+    /// <param name="text">The balloon's body; the title is shown instead when it's null or empty.</param>
     public void ShowBalloon(string title, string text)
     {
         try

@@ -10,6 +10,8 @@ namespace BCUKCompanion.Core.Actions;
 public sealed class BotEventActionContext(BotEventArgs botEvent, IEventActionContext inner) : IEventActionContext
 {
     /// <summary>Returns the dispatched <see cref="BotEventArgs"/> when asked for it; otherwise defers to the app's context.</summary>
+    /// <param name="serviceType">The type of service an action is asking for.</param>
+    /// <returns>The dispatched event for <see cref="BotEventArgs"/>; otherwise whatever the app's context returns, or null.</returns>
     public object? GetService(Type serviceType) =>
         serviceType == typeof(BotEventArgs) ? botEvent : inner.GetService(serviceType);
 }

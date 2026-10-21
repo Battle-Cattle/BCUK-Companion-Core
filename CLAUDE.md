@@ -146,11 +146,12 @@ Qlty reports function complexity, too many returns, deep nesting, long parameter
 
 ### Docstrings
 
-- Every type and member must have a `///` XML doc comment (`<summary>`, plus `<param>`/`<returns>` where they add something) saying what it does. This covers public APIs, `internal`/`private` helpers, properties, constants and enum values. One line is enough for simple cases.
+- Every type and member must have a `///` XML doc comment (`<summary>`) saying what it does. This covers public APIs, `internal`/`private` helpers, properties, constants and enum values. One line is enough for simple cases.
+- Each parameter gets a `<param>` and a member that returns a value gets a `<returns>`, each with text. Say what the value is, not just its name: "Seconds to wait before the next reconnect attempt", not "The delay." For a `Task`-returning method, say what the task completes with. A record's positional parameters are documented with `<param>` on the record.
 - When you change a member's signature or behaviour, update its doc comment to match. Stale docs are worse than no docs.
 - **Test projects are exempt.** A descriptive test method name documents the behaviour instead. Test-local fakes and helpers don't need doc comments either. Source projects still follow the rule above.
 - **Concise lambdas** (LINQ selectors, event handlers wired inline, `Task.Run` bodies) don't need a doc comment. Add a short `//` comment only when the behaviour isn't obvious from the code.
-- The build enforces this. `Directory.Build.props` and `.editorconfig` turn StyleCop's SA1600/SA1601/SA1602 into errors (`stylecop.json` extends them to internal and private members), and a `<param>`, `<paramref>` or `<see cref>` that no longer matches the code fails the build too. Private fields are exempt. Use `/// <inheritdoc/>` on an override that adds nothing to its base's docs.
+- The build enforces this. `Directory.Build.props` and `.editorconfig` turn StyleCop's SA1600/SA1601/SA1602 (missing docs), SA1611/SA1615 (missing `<param>`/`<returns>`) and SA1614/SA1616 (empty ones) into errors (`stylecop.json` extends them to internal and private members), and a `<param>`, `<paramref>` or `<see cref>` that no longer matches the code fails the build too. Private fields are exempt. Use `/// <inheritdoc/>` on an override that adds nothing to its base's docs.
 
 ### Tests
 

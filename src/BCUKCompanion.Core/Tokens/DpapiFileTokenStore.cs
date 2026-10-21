@@ -26,7 +26,7 @@ public sealed class DpapiFileTokenStore : ITokenStore
     }
 
     /// <summary>Reads and decrypts the saved token.</summary>
-    /// <returns>The token, or null if none is saved or it can't be decrypted (e.g. it was saved by another Windows user).</returns>
+    /// <returns>The token, or null if none is saved or it can't be decrypted (e.g. it was saved by another Windows user). An I/O or access error reading the file propagates.</returns>
     public string? Load()
     {
         if (!File.Exists(_filePath))
@@ -48,6 +48,7 @@ public sealed class DpapiFileTokenStore : ITokenStore
     }
 
     /// <summary>Encrypts <paramref name="token"/> for the current Windows user and replaces the saved token file with it.</summary>
+    /// <param name="token">The companion bearer token to save.</param>
     public void Save(string token)
     {
         string? directory = Path.GetDirectoryName(_filePath);
@@ -96,6 +97,7 @@ public sealed class DpapiFileTokenStore : ITokenStore
     }
 
     /// <summary>Deletes <paramref name="path"/>; a missing file or folder is not an error.</summary>
+    /// <param name="path">The full path of the file to delete.</param>
     private static void DeleteIfFolderExists(string path)
     {
         try
@@ -108,6 +110,7 @@ public sealed class DpapiFileTokenStore : ITokenStore
     }
 
     /// <summary>Best-effort delete used while already handling a failure, so it never masks that failure.</summary>
+    /// <param name="path">The full path of the file to delete; any I/O or permission error is ignored.</param>
     private static void TryDelete(string path)
     {
         try

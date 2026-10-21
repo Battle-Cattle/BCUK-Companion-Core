@@ -11,6 +11,7 @@ public sealed class CompositeEventActionContext(params IEventActionContext[] con
 {
     /// <summary>Returns the first service any of the combined contexts provides for <paramref name="serviceType"/>, in the order they were given.</summary>
     /// <param name="serviceType">The type of service an action is asking for.</param>
+    /// <returns>The first non-null service found, or null when no context provides one.</returns>
     public object? GetService(Type serviceType)
     {
         foreach (var context in contexts)

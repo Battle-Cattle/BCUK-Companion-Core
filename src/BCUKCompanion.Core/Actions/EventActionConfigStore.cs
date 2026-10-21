@@ -44,6 +44,7 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// single action that can't be read (an unregistered kind, a bad value) doesn't make the file
     /// corrupt: it loads as an <see cref="UnrecognizedEventAction"/>, which is saved back unchanged.
     /// </summary>
+    /// <returns>The loaded (or newly created) config, after <see cref="OnLoaded"/>.</returns>
     public TConfig Load()
     {
         lock (syncRoot)
@@ -58,15 +59,19 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// persist the result so the migration runs at most once. Runs under the store's lock, which
     /// <see cref="Save"/> may re-enter from here.
     /// </summary>
+    /// <returns>The config to use in place of the missing file.</returns>
     protected virtual TConfig CreateWhenMissing() => new();
 
     /// <summary>
     /// Post-processes every loaded config before <see cref="Load"/> returns it — e.g. to drop
     /// entries a hand-edited file left invalid. Returns <paramref name="config"/> unchanged by default.
     /// </summary>
+    /// <param name="config">The config just read from the file or supplied by <see cref="CreateWhenMissing"/>.</param>
+    /// <returns>The config <see cref="Load"/> should return.</returns>
     protected virtual TConfig OnLoaded(TConfig config) => config;
 
     /// <summary>Reads and parses the existing file. A file that isn't valid JSON is backed up and replaced by a new <typeparamref name="TConfig"/>; I/O and permission errors propagate.</summary>
+    /// <returns>The parsed config; a new <typeparamref name="TConfig"/> when the file is corrupt or holds JSON <c>null</c>.</returns>
     private TConfig ReadConfigFile()
     {
         try

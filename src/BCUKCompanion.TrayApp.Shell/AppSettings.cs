@@ -28,6 +28,8 @@ public sealed class AppSettings
     /// doesn't change which event stream is read and must not split its saved id. Any user info
     /// in the URL is left out so credentials never end up in settings.json.
     /// </summary>
+    /// <param name="botHost">The configured bot URL.</param>
+    /// <returns>The lower-cased scheme, host and port, e.g. <c>https://bot.example.com</c> (non-default port included).</returns>
     public static string ActivityKey(Uri botHost) =>
         botHost.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped).ToLowerInvariant();
 
@@ -35,6 +37,7 @@ public sealed class AppSettings
     /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
     /// missing, unreadable or has an invalid bot host.
     /// </summary>
+    /// <returns>The saved settings, or defaults when they can't be used; never null. A bundled appsettings.json whose root isn't a JSON object, or whose <c>botHost</c> is neither a string nor JSON null, throws <see cref="InvalidOperationException"/>.</returns>
     public static AppSettings Load()
     {
         try
@@ -60,11 +63,14 @@ public sealed class AppSettings
     }
 
     /// <summary>Whether <paramref name="botHost"/> is an absolute https URL, as the companion API requires.</summary>
+    /// <param name="botHost">The bot URL to check, as text.</param>
+    /// <returns>True when it parses as an absolute https URL; otherwise false.</returns>
     private static bool IsValidBotHost(string botHost) =>
         Uri.TryCreate(botHost, UriKind.Absolute, out Uri? uri)
         && uri.Scheme == Uri.UriSchemeHttps;
 
     /// <summary>New settings with <see cref="BotHost"/> taken from the appsettings.json shipped next to the executable, when it holds a valid one.</summary>
+    /// <returns>New settings; <see cref="BotHost"/> keeps its hard-coded default if the bundled file is missing, unreadable, not valid JSON, or has no https <c>botHost</c> string. A JSON root that isn't an object, or a <c>botHost</c> that's neither a string nor JSON null, throws <see cref="InvalidOperationException"/>.</returns>
     private static AppSettings LoadDefaultsFromBundledConfig()
     {
         var settings = new AppSettings();

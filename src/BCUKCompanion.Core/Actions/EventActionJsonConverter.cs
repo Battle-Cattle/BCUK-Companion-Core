@@ -24,6 +24,10 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
     public override bool HandleNull => true;
 
     /// <summary>Reads one action, turning anything that can't be read as a registered kind into an <see cref="UnrecognizedEventAction"/>.</summary>
+    /// <param name="reader">The JSON reader, positioned at the action's value.</param>
+    /// <param name="typeToConvert">Always <see cref="IEventAction"/>; unused.</param>
+    /// <param name="options">The serializer options, used to deserialize the registered action type.</param>
+    /// <returns>The deserialized action, or an <see cref="UnrecognizedEventAction"/> holding the raw JSON and the reason; never null.</returns>
     public override IEventAction? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType == JsonTokenType.Null)
@@ -45,6 +49,7 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
     /// <param name="kind">The action's kind, or empty if it has none.</param>
     /// <param name="actionType">The registered type for <paramref name="kind"/>, when found.</param>
     /// <param name="problem">Why the action can't be run, when no type was found.</param>
+    /// <returns>True when <paramref name="kind"/> is registered; false when <paramref name="problem"/> says why not.</returns>
     private bool TryResolveType(
         JsonElement root,
         out string kind,
@@ -75,6 +80,11 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
     }
 
     /// <summary>Deserializes an action of a registered type, or an <see cref="UnrecognizedEventAction"/> if its values can't be read.</summary>
+    /// <param name="json">The action's raw JSON.</param>
+    /// <param name="kind">The action's registered kind, used in the failure message.</param>
+    /// <param name="actionType">The registered type to deserialize into.</param>
+    /// <param name="options">The serializer options to deserialize with.</param>
+    /// <returns>The deserialized action, or an <see cref="UnrecognizedEventAction"/> holding <paramref name="json"/> when it can't be read.</returns>
     private static IEventAction Deserialize(string json, string kind, Type actionType, JsonSerializerOptions options)
     {
         try
@@ -93,6 +103,9 @@ public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) :
     }
 
     /// <summary>Writes an action with its "kind" first, or an <see cref="UnrecognizedEventAction"/> exactly as it was read.</summary>
+    /// <param name="writer">The JSON writer to write the action to.</param>
+    /// <param name="value">The action to write; null writes a JSON <c>null</c>.</param>
+    /// <param name="options">The serializer options, used to serialize the action's own properties.</param>
     public override void Write(Utf8JsonWriter writer, IEventAction? value, JsonSerializerOptions options)
     {
         if (value is null)

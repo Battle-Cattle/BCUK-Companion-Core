@@ -33,6 +33,10 @@ public sealed class LoopbackOAuthClient
     /// token. <paramref name="openBrowser"/> is invoked with the login URL
     /// the caller must open (e.g. via <c>Process.Start</c>).
     /// </summary>
+    /// <param name="openBrowser">Opens the given login URL in the user's browser; awaited before the wait for the redirect starts.</param>
+    /// <param name="timeout">How long to wait for the bot's redirect; 5 minutes when null.</param>
+    /// <param name="cancellationToken">Cancels the login.</param>
+    /// <returns>A task whose result is the bearer token the bot issued.</returns>
     public async Task<string> LoginAsync(
         Func<Uri, Task> openBrowser,
         TimeSpan? timeout = null,
@@ -77,6 +81,10 @@ public sealed class LoopbackOAuthClient
     }
 
     /// <summary>The bot's companion login URL, carrying the loopback redirect, the OAuth <c>state</c> and the PKCE S256 challenge.</summary>
+    /// <param name="redirectUri">The loopback URL the bot redirects back to.</param>
+    /// <param name="state">The random OAuth <c>state</c> the redirect must echo.</param>
+    /// <param name="codeChallenge">The PKCE S256 challenge derived from the code verifier.</param>
+    /// <returns>The absolute <c>/companion/login</c> URL on the bot host, with those values as query parameters.</returns>
     internal Uri BuildLoginUrl(Uri redirectUri, string state, string codeChallenge)
     {
         string query = $"redirect_uri={Uri.EscapeDataString(redirectUri.ToString())}&state={Uri.EscapeDataString(state)}"
@@ -85,10 +93,14 @@ public sealed class LoopbackOAuthClient
     }
 
     /// <summary>The PKCE S256 challenge for <paramref name="codeVerifier"/>: base64url (no padding) of its SHA-256.</summary>
+    /// <param name="codeVerifier">The PKCE code verifier, hashed as ASCII.</param>
+    /// <returns>The base64url-encoded SHA-256 of the verifier.</returns>
     internal static string CodeChallenge(string codeVerifier) =>
         Base64Url(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(codeVerifier)));
 
     /// <summary>Base64url encoding without padding (RFC 4648 §5), as PKCE and the OAuth state use.</summary>
+    /// <param name="bytes">The bytes to encode.</param>
+    /// <returns>The base64url text, with no trailing <c>=</c> padding.</returns>
     private static string Base64Url(ReadOnlySpan<byte> bytes) =>
         Convert.ToBase64String(bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=');
 
@@ -96,6 +108,7 @@ public sealed class LoopbackOAuthClient
     /// 32 random bytes, base64url-encoded (43 characters): used for the OAuth <c>state</c> and as
     /// the PKCE code verifier.
     /// </summary>
+    /// <returns>A fresh 43-character base64url string of cryptographically random bytes.</returns>
     internal static string GenerateState()
     {
         Span<byte> bytes = stackalloc byte[32];
@@ -104,6 +117,10 @@ public sealed class LoopbackOAuthClient
     }
 
     /// <summary>Exchanges the one-time <paramref name="code"/> and its PKCE <paramref name="codeVerifier"/> for the bearer token.</summary>
+    /// <param name="code">The one-time authorization code from the bot's redirect.</param>
+    /// <param name="codeVerifier">The PKCE code verifier whose challenge was sent with the login URL.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is the bearer token from the response's <c>token</c> field.</returns>
     private async Task<string> ExchangeCodeForTokenAsync(string code, string codeVerifier, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/oauth/token");
@@ -129,6 +146,8 @@ public sealed class LoopbackOAuthClient
     }
 
     /// <summary>Reads the <c>error</c> field from an error response's JSON body, or null if the body isn't JSON or has none.</summary>
+    /// <param name="body">The response body text.</param>
+    /// <returns>The <c>error</c> string, or null when the body isn't JSON or has no <c>error</c> field.</returns>
     private static string? TryExtractError(string body)
     {
         try

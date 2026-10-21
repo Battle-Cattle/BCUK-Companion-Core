@@ -19,6 +19,9 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     /// Throws <see cref="UnauthorizedAccessException"/> if the install folder isn't writable (e.g.
     /// under Program Files) so the caller can point the user at a manual download instead.
     /// </summary>
+    /// <param name="update">The release to download and install.</param>
+    /// <param name="cancellationToken">Cancels the download and extraction.</param>
+    /// <returns>A task that completes once the swap script has been started.</returns>
     public async Task PrepareAndLaunchAsync(AvailableUpdate update, CancellationToken cancellationToken = default)
     {
         string installDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
@@ -136,6 +139,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
         """;
 
     /// <summary>Throws <see cref="UnauthorizedAccessException"/> unless a file can be created in <paramref name="directory"/>, so an install under e.g. Program Files fails before anything is downloaded.</summary>
+    /// <param name="directory">The install folder to probe with a temporary file.</param>
     private static void EnsureWritable(string directory)
     {
         string probe = Path.Combine(directory, $".update-probe-{Guid.NewGuid():N}");
