@@ -68,6 +68,8 @@ public sealed class GitHubReleaseUpdateChecker
     /// Returns the latest non-prerelease release if it is newer than <see cref="CurrentVersion"/>
     /// and carries a matching zip, otherwise <c>null</c>. Network and API errors propagate.
     /// </summary>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is the newer release's details, or null when there's no release, it isn't newer, it has no matching zip, or one of its URLs isn't https.</returns>
     public async Task<AvailableUpdate?> CheckForUpdateAsync(CancellationToken cancellationToken = default)
     {
         var latestReleaseUrl = new Uri($"https://api.github.com/repos/{repoOwner}/{repoName}/releases/latest");
@@ -120,6 +122,10 @@ public sealed class GitHubReleaseUpdateChecker
     /// always publishes one, so its absence means a hand-made or broken release. On any failure the
     /// partially written or mismatched file is deleted.
     /// </summary>
+    /// <param name="update">The release to download, as returned by <see cref="CheckForUpdateAsync"/>.</param>
+    /// <param name="destinationPath">The full path to write the zip to; an existing file is overwritten.</param>
+    /// <param name="cancellationToken">Cancels the download.</param>
+    /// <returns>A task that completes once the zip has been downloaded and its checksum verified.</returns>
     public async Task DownloadAsync(AvailableUpdate update, string destinationPath, CancellationToken cancellationToken = default)
     {
         if (update.ChecksumUrl is null)
@@ -164,6 +170,9 @@ public sealed class GitHubReleaseUpdateChecker
     /// Release URLs come from the API response and the page URL is later opened with the shell,
     /// so anything that isn't plain https (file:, a UNC path, another scheme) is rejected.
     /// </summary>
+    /// <param name="value">The URL text from the API response; may be null.</param>
+    /// <param name="uri">The parsed URL when it's an absolute https URL; otherwise null.</param>
+    /// <returns>True when <paramref name="value"/> is an absolute https URL.</returns>
     private static bool TryCreateHttpsUri(string? value, [NotNullWhen(true)] out Uri? uri)
     {
         if (Uri.TryCreate(value, UriKind.Absolute, out uri) && uri.Scheme == Uri.UriSchemeHttps)
@@ -176,6 +185,7 @@ public sealed class GitHubReleaseUpdateChecker
     }
 
     /// <summary>Best-effort: a failure to clean up must not hide the download or checksum error that caused it.</summary>
+    /// <param name="path">The full path of the file to delete; any I/O or permission error is ignored.</param>
     private static void TryDelete(string path)
     {
         try
@@ -192,6 +202,10 @@ public sealed class GitHubReleaseUpdateChecker
     /// matches <paramref name="checksumText"/> — either a bare hex digest or <c>sha256sum</c>
     /// output (<c>&lt;hex&gt;  &lt;file name&gt;</c>).
     /// </summary>
+    /// <param name="filePath">The full path of the downloaded file to hash.</param>
+    /// <param name="checksumText">The checksum file's contents; only its first whitespace-separated token is used.</param>
+    /// <param name="cancellationToken">Cancels hashing the file.</param>
+    /// <returns>A task that completes when the file matches; it faults with <see cref="InvalidDataException"/> otherwise.</returns>
     public static async Task VerifySha256Async(string filePath, string checksumText, CancellationToken cancellationToken = default)
     {
         var expected = checksumText.Trim().Split((char[]?)null, 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
@@ -213,6 +227,9 @@ public sealed class GitHubReleaseUpdateChecker
     }
 
     /// <summary>Creates the client used when the caller doesn't pass one, with the User-Agent and Accept headers GitHub's API expects.</summary>
+    /// <param name="repoName">The repository name, sent as the User-Agent product name.</param>
+    /// <param name="currentVersion">The running app's version, sent as the User-Agent product version.</param>
+    /// <returns>A new client with a 5-minute timeout, owned by this checker.</returns>
     private static HttpClient CreateHttpClient(string repoName, AppVersion currentVersion)
     {
         var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };

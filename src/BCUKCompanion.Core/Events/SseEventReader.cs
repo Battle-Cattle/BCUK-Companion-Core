@@ -24,6 +24,9 @@ public sealed class SseEventReader
     /// if given, is invoked for every line read (including comments) so a
     /// caller can use it as a connection liveness signal.
     /// </summary>
+    /// <param name="onActivity">Called for every line read, including comments and blank lines; null for none.</param>
+    /// <param name="cancellationToken">Stops reading; passed to each line read.</param>
+    /// <returns>The events, in order, until the reader reaches the end of the stream (a final unterminated block is still yielded).</returns>
     public async IAsyncEnumerable<SseEvent> ReadEventsAsync(
         Action? onActivity = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -72,6 +75,9 @@ public sealed class SseEventReader
     }
 
     /// <summary>Returns a field's value: the line after <paramref name="prefix"/>, minus one leading space if present (per the SSE spec).</summary>
+    /// <param name="line">The whole SSE line, which starts with <paramref name="prefix"/>.</param>
+    /// <param name="prefix">The field name and colon, e.g. <c>data:</c>.</param>
+    /// <returns>The field's value.</returns>
     private static string StripFieldPrefix(string line, string prefix)
     {
         string rest = line[prefix.Length..];

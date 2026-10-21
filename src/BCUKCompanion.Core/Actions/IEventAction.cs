@@ -14,9 +14,13 @@ public interface IEventAction
     string Kind { get; }
 
     /// <summary>Human-readable summary for UI display (mapping/action lists), e.g. "Delay 5s".</summary>
+    /// <param name="context">Provides the services the description may read, such as a device's display name.</param>
+    /// <returns>A one-line description of the action.</returns>
     string Describe(IEventActionContext context);
 
     /// <summary>Returns validation error messages; an empty list means valid.</summary>
+    /// <param name="context">Provides the services the check may need, such as a configured device.</param>
+    /// <returns>The validation error messages; empty when the action is valid.</returns>
     IReadOnlyList<string> Validate(IEventActionContext context);
 
     /// <summary>Runs the action. The dispatcher validates it first and turns an exception into a failed result, so an implementation can throw for a missing service or device.</summary>

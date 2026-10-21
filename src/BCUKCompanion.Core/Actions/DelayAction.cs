@@ -21,10 +21,12 @@ public sealed class DelayAction : IEventAction
 
     /// <summary>Describes the action for the mappings list, e.g. "Delay 5s".</summary>
     /// <param name="context">Unused: the description needs no live state.</param>
+    /// <returns>A one-line description naming the delay in seconds.</returns>
     public string Describe(IEventActionContext context) => $"Delay {DelaySeconds}s";
 
     /// <summary>Rejects a delay outside <see cref="MinDelaySeconds"/>–<see cref="MaxDelaySeconds"/>.</summary>
     /// <param name="context">Unused: the check needs no live state.</param>
+    /// <returns>One error message when the delay is out of range; empty when it's valid.</returns>
     public IReadOnlyList<string> Validate(IEventActionContext context)
     {
         if (DelaySeconds < MinDelaySeconds || DelaySeconds > MaxDelaySeconds)

@@ -36,6 +36,7 @@ public sealed class DelayActionEditor : EventActionEditor
 
     /// <summary>True for <see cref="DelayAction"/>.</summary>
     /// <param name="action">The action being edited.</param>
+    /// <returns>True when <paramref name="action"/> is a <see cref="DelayAction"/>; otherwise false.</returns>
     public override bool CanEdit(IEventAction action) => action is DelayAction;
 
     /// <summary>Shows an existing action's delay.</summary>
@@ -45,6 +46,7 @@ public sealed class DelayActionEditor : EventActionEditor
 
     /// <summary>Builds a Delay action from the text box, which must hold a whole number (its range is checked by <see cref="DelayAction.Validate"/>).</summary>
     /// <param name="error">Why the input can't be used, when null is returned.</param>
+    /// <returns>The new <see cref="DelayAction"/>, or null when the text isn't a whole number.</returns>
     public override IEventAction? TryBuild(out string? error)
     {
         if (!int.TryParse(delayBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out var seconds))

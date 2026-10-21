@@ -14,6 +14,7 @@ public static class SingletonWindowMenuItem
     /// <typeparam name="TWindow">The window type.</typeparam>
     /// <param name="label">The menu item's text.</param>
     /// <param name="createWindow">Creates a new window, when none is open.</param>
+    /// <returns>A menu item whose click shows the window, reusing the open instance if there is one.</returns>
     public static TrayMenuItem Create<TWindow>(string label, Func<TWindow> createWindow) where TWindow : Window
     {
         TWindow? window = null;

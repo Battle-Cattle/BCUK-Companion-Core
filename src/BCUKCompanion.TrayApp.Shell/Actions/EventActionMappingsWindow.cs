@@ -84,6 +84,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         public IEventAction Action { get; } = action;
 
         /// <summary>The action's description, as shown in the list.</summary>
+        /// <returns>The description the row was created with.</returns>
         public override string ToString() => display;
     }
 
@@ -106,9 +107,11 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     }
 
     /// <summary>Builds the config to save from the window's current state: <see cref="Mappings"/> plus the subclass's own state.</summary>
+    /// <returns>A new config holding the current mappings and integration-specific state.</returns>
     protected abstract TConfig BuildConfig();
 
     /// <summary>Builds the context actions are described, validated and tested with (e.g. the current device list).</summary>
+    /// <returns>A context reflecting the window's current, possibly unsaved, state.</returns>
     protected abstract IEventActionContext BuildContext();
 
     /// <summary>
@@ -117,15 +120,21 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// Called each time the dialog opens, so return new editors every time. Not needed by a
     /// subclass that overrides <see cref="ShowAddActionDialog"/>/<see cref="ShowEditActionDialog"/>.
     /// </summary>
+    /// <returns>Fresh editors for this app's action kinds; empty by default.</returns>
     protected virtual IEnumerable<EventActionEditor> CreateActionEditors() => [];
 
     /// <summary>Shows the Add Action dialog; returns the new action, or null if cancelled.</summary>
+    /// <returns>The action the user built, or null if they cancelled the dialog.</returns>
     protected virtual IEventAction? ShowAddActionDialog() => ShowActionEditDialog(null);
 
     /// <summary>Shows the Edit Action dialog; returns the edited action, or null if cancelled.</summary>
+    /// <param name="existing">The action to edit, whose parameters pre-fill the dialog.</param>
+    /// <returns>The replacement action, or null if the user cancelled the dialog.</returns>
     protected virtual IEventAction? ShowEditActionDialog(IEventAction existing) => ShowActionEditDialog(existing);
 
     /// <summary>Shows the Add/Edit Action dialog with this app's editors plus <see cref="DelayActionEditor"/>; returns the action, or null if cancelled.</summary>
+    /// <param name="existing">The action to edit, or null to add a new one.</param>
+    /// <returns>The action the dialog produced, or null if the user cancelled it.</returns>
     private IEventAction? ShowActionEditDialog(IEventAction? existing)
     {
         var editors = CreateActionEditors().Append(new DelayActionEditor()).ToList();
@@ -137,6 +146,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// The window's bottom bar: <see cref="StatusText"/> with <see cref="SaveButton"/> docked to
     /// its right. Subclasses dock it at the bottom of their own layout.
     /// </summary>
+    /// <returns>A new <see cref="DockPanel"/> holding the status text and Save button.</returns>
     protected UIElement BuildFooter()
     {
         var footer = new DockPanel { Margin = new Thickness(12, 8, 12, 12) };
@@ -147,6 +157,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     }
 
     /// <summary>Builds the mappings editor: the mapping list with its Add/Remove buttons, and the selected mapping's actions with Add/Edit/Remove/Test.</summary>
+    /// <returns>The tab's content: a <see cref="DockPanel"/> with the mappings on the left and their actions on the right.</returns>
     protected UIElement BuildMappingsTab()
     {
         MappingsList.ItemsSource = Mappings;
@@ -244,6 +255,8 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     }
 
     /// <summary>The names already used by mappings of <paramref name="kind"/>.</summary>
+    /// <param name="kind">Whether to list reward titles or command names.</param>
+    /// <returns>The distinct names (case-insensitively) of the current mappings of that kind.</returns>
     private IEnumerable<string> MappedNames(EventActionTriggerKind kind) =>
         Mappings.Where(m => m.TriggerKind == kind).Select(m => m.RewardTitle).Distinct(StringComparer.OrdinalIgnoreCase);
 
@@ -251,6 +264,9 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// Fetches the live names for <paramref name="kind"/>: enabled reward titles, or the
     /// advanced commands that send events to this app.
     /// </summary>
+    /// <param name="client">The logged-in client to query the bot with.</param>
+    /// <param name="kind">Whether to fetch reward titles or command names.</param>
+    /// <returns>A task that completes with the names; it faults if the bot can't be reached.</returns>
     private static async Task<IEnumerable<string>> FetchNamesAsync(CompanionClient client, EventActionTriggerKind kind)
     {
         if (kind == EventActionTriggerKind.Command)
@@ -267,6 +283,10 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// Replaces the title suggestions with the server's rewards or commands (per <paramref name="kind"/>) plus the
     /// already-mapped names, unless the fetch fails or a newer refresh (<paramref name="sequence"/>) has started.
     /// </summary>
+    /// <param name="client">The logged-in client to query the bot with.</param>
+    /// <param name="kind">Whether to fetch reward titles or command names.</param>
+    /// <param name="sequence">The refresh number this fetch belongs to; its result is dropped if a later refresh has started.</param>
+    /// <returns>A task that completes once the suggestions are applied or skipped; it never faults.</returns>
     private async Task RefreshRewardTitleSuggestionsFromServerAsync(CompanionClient client, EventActionTriggerKind kind, int sequence)
     {
         IEnumerable<string> names;
@@ -422,6 +442,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     }
 
     /// <summary>Runs the selected mapping's actions now, as if its event had arrived, and shows each action's result.</summary>
+    /// <returns>A task that completes once the results are shown; failures are reported in <see cref="StatusText"/>, not thrown.</returns>
     private async Task OnTestAsync()
     {
         if (MappingsList.SelectedItem is not EventActionMapping mapping)
@@ -484,6 +505,8 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// Removes every action matching <paramref name="shouldRemove"/> from every mapping — e.g. the
     /// actions targeting a device that was just deleted — and returns how many were removed.
     /// </summary>
+    /// <param name="shouldRemove">Returns true for each action to remove.</param>
+    /// <returns>The number of actions removed across all mappings; 0 if none matched.</returns>
     protected int RemoveActions(Func<IEventAction, bool> shouldRemove)
     {
         var removedCount = 0;
@@ -505,6 +528,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     }
 
     /// <summary>Saves <see cref="BuildConfig"/> to the config file off the UI thread, with the window disabled so nothing can change mid-save.</summary>
+    /// <returns>A task that completes once the save finishes; a failure is reported in <see cref="StatusText"/>, not thrown.</returns>
     private async Task OnSaveAsync()
     {
         // Disable the whole window, not just SaveButton: BuildConfig() below snapshots the

@@ -12,6 +12,7 @@ public static class ReconnectBackoff
     private const double JitterFraction = 0.2;
 
     /// <param name="attempt">0-based reconnect attempt number.</param>
+    /// <returns>How long to wait before the attempt: 2^<paramref name="attempt"/> seconds &#177;20% jitter, capped at 30 seconds.</returns>
     public static TimeSpan GetDelay(int attempt) => GetDelay(attempt, null);
 
     /// <param name="attempt">0-based reconnect attempt number.</param>
@@ -19,6 +20,7 @@ public static class ReconnectBackoff
     /// Random source used for jitter. Defaults to <see cref="Random.Shared"/>; pass an explicit
     /// instance (e.g. seeded) for deterministic tests.
     /// </param>
+    /// <returns>How long to wait before the attempt: 2^<paramref name="attempt"/> seconds &#177;20% jitter, capped at 30 seconds; a negative attempt counts as 0.</returns>
     public static TimeSpan GetDelay(int attempt, Random? random)
     {
         if (attempt < 0)

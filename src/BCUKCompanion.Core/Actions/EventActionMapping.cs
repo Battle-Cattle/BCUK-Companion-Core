@@ -28,6 +28,7 @@ public sealed record EventActionMapping(
     EventActionTriggerKind TriggerKind = EventActionTriggerKind.Reward)
 {
     /// <summary>The mapping's label in the mappings list, prefixed with "Command:" for a command mapping.</summary>
+    /// <returns>The name and action count, e.g. "Command: hug (2 action(s))".</returns>
     public override string ToString() => TriggerKind == EventActionTriggerKind.Command
         ? $"Command: {RewardTitle} ({Actions.Count} action(s))"
         : $"{RewardTitle} ({Actions.Count} action(s))";

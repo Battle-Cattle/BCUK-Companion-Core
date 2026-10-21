@@ -27,6 +27,8 @@ public partial class LoginWindow : Window
     }
 
     /// <summary>Re-points this still-open window at a companion client created for a newly saved bot host.</summary>
+    /// <param name="companionClient">The client for the new bot host, used for the next login attempt.</param>
+    /// <param name="botHost">The new server URL to show.</param>
     internal void UpdateCompanionClient(CompanionClient companionClient, string botHost)
     {
         _companionClient = companionClient;
@@ -34,6 +36,8 @@ public partial class LoginWindow : Window
     }
 
     /// <summary>Validates and applies the typed server URL (raising <see cref="ServerHostChanged"/>), unless a login is in progress.</summary>
+    /// <param name="sender">The server field's Change button (unused).</param>
+    /// <param name="e">Click event data (unused).</param>
     private void ChangeServerButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isBusy)
@@ -67,6 +71,8 @@ public partial class LoginWindow : Window
     }
 
     /// <summary>Runs the browser login and closes the window on success, or shows why it failed.</summary>
+    /// <param name="sender">The "Login with Discord (opens browser)" button (unused).</param>
+    /// <param name="e">Click event data (unused).</param>
     private async void LoginWithBrowserButton_Click(object sender, RoutedEventArgs e)
     {
         SetBusy(true, string.Empty);
@@ -87,6 +93,8 @@ public partial class LoginWindow : Window
     }
 
     /// <summary>Saves the pasted token and closes the window, or shows why it couldn't.</summary>
+    /// <param name="sender">The Save Token button (unused).</param>
+    /// <param name="e">Click event data (unused).</param>
     private void SaveTokenButton_Click(object sender, RoutedEventArgs e)
     {
         string token = TokenBox.Password.Trim();
@@ -111,6 +119,8 @@ public partial class LoginWindow : Window
     }
 
     /// <summary>Opens the login URL in the default browser, refusing anything but an http(s) URL.</summary>
+    /// <param name="uri">The bot's login page URL.</param>
+    /// <returns>An already-completed task once the browser has been started; throws <see cref="InvalidOperationException"/> for a non-web URL.</returns>
     private static Task OpenBrowserAsync(Uri uri)
     {
         // UseShellExecute launches whatever the URL points at, so only ever hand it a web URL —
@@ -125,6 +135,8 @@ public partial class LoginWindow : Window
     }
 
     /// <summary>Enables or disables the window's controls around a login attempt, and shows <paramref name="status"/>.</summary>
+    /// <param name="busy">True to disable the login and server controls while an attempt runs; false to re-enable them.</param>
+    /// <param name="status">The text for the status line; empty to clear it.</param>
     private void SetBusy(bool busy, string status)
     {
         _isBusy = busy;

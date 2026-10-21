@@ -12,6 +12,8 @@ internal static class LoopbackCallbackListener
     /// Probes for a free loopback port and starts <paramref name="listener"/> on it,
     /// retrying with a new port if another process wins the race for the one just probed.
     /// </summary>
+    /// <param name="listener">The not-yet-started listener; its prefixes are replaced with <c>http://127.0.0.1:{port}/callback/</c>.</param>
+    /// <returns>The loopback port the listener is now listening on.</returns>
     internal static int StartListenerOnFreePort(HttpListener listener)
     {
         const int maxAttempts = 5;
@@ -35,6 +37,7 @@ internal static class LoopbackCallbackListener
     }
 
     /// <summary>A loopback port that was free a moment ago (another process can still take it before it is bound).</summary>
+    /// <returns>The port number the OS assigned to a briefly opened loopback listener.</returns>
     private static int GetFreeLoopbackPort()
     {
         var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -51,6 +54,11 @@ internal static class LoopbackCallbackListener
     /// <c>error</c> redirect carrying the expected state, <paramref name="timeout"/> or the
     /// caller's cancellation ends the wait.
     /// </summary>
+    /// <param name="listener">The started loopback listener the bot redirects to.</param>
+    /// <param name="expectedState">The <c>state</c> value sent with the authorize request; a redirect must echo it.</param>
+    /// <param name="timeout">How long to wait for the redirect before giving up.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>A task whose result is the redirect's request context, still open for the caller to answer, and its authorization code.</returns>
     /// <exception cref="CompanionAuthException">The bot redirected back with an <c>error</c>.</exception>
     internal static async Task<(HttpListenerContext Context, string Code)> WaitForCallbackAsync(
         HttpListener listener, string expectedState, TimeSpan timeout, CancellationToken cancellationToken)
@@ -85,6 +93,9 @@ internal static class LoopbackCallbackListener
     }
 
     /// <summary>Answers the browser and closes the response, tolerating a client that already went away.</summary>
+    /// <param name="context">The request to answer.</param>
+    /// <param name="statusCode">The HTTP status code to send.</param>
+    /// <param name="html">The HTML page to show in the browser.</param>
     internal static void RespondAndClose(HttpListenerContext context, int statusCode, string html)
     {
         try
@@ -102,6 +113,10 @@ internal static class LoopbackCallbackListener
     /// The next request to <paramref name="listener"/>, or an <see cref="OperationCanceledException"/>
     /// once <paramref name="canceled"/> completes (the caller's cancellation or the login timeout).
     /// </summary>
+    /// <param name="listener">The loopback listener to take the next request from.</param>
+    /// <param name="canceled">A task that completes when the caller cancels or the login times out.</param>
+    /// <param name="cancellationToken">The caller's own token, used to tell a deliberate cancel from a timeout.</param>
+    /// <returns>A task whose result is the next request's context.</returns>
     private static async Task<HttpListenerContext> NextContextAsync(
         HttpListener listener, Task canceled, CancellationToken cancellationToken)
     {
@@ -129,6 +144,10 @@ internal static class LoopbackCallbackListener
     }
 
     /// <summary>Whether <paramref name="context"/> is the bot's redirect: a code and the expected state.</summary>
+    /// <param name="context">The incoming request.</param>
+    /// <param name="expectedState">The <c>state</c> the redirect must carry.</param>
+    /// <param name="code">The request's <c>code</c> query value, or empty if it has none.</param>
+    /// <returns>True when the request has a non-empty code and the expected state.</returns>
     private static bool TryGetCallbackCode(HttpListenerContext context, string expectedState, out string code)
     {
         code = context.Request.QueryString["code"] ?? string.Empty;
@@ -136,6 +155,9 @@ internal static class LoopbackCallbackListener
     }
 
     /// <summary>The <c>error</c> of a redirect carrying the expected <c>state</c>, or null if it isn't one.</summary>
+    /// <param name="context">The incoming request.</param>
+    /// <param name="expectedState">The <c>state</c> the redirect must carry.</param>
+    /// <returns>The <c>error</c> query value, or null when there is none or the state doesn't match.</returns>
     private static string? GetCallbackError(HttpListenerContext context, string expectedState)
     {
         string? error = context.Request.QueryString["error"];
@@ -143,6 +165,9 @@ internal static class LoopbackCallbackListener
     }
 
     /// <summary>Writes <paramref name="html"/> as the response to the browser with <paramref name="statusCode"/>.</summary>
+    /// <param name="context">The request to answer.</param>
+    /// <param name="statusCode">The HTTP status code to send.</param>
+    /// <param name="html">The HTML page to send, encoded as UTF-8.</param>
     private static void RespondHtml(HttpListenerContext context, int statusCode, string html)
     {
         byte[] buffer = System.Text.Encoding.UTF8.GetBytes(html);

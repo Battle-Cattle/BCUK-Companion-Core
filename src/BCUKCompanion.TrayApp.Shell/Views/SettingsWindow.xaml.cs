@@ -30,18 +30,22 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>Reflects a bot host changed elsewhere (the Login window's own server field) while this window is open.</summary>
+    /// <param name="botHost">The new server URL to show.</param>
     internal void RefreshBotHost(string botHost)
     {
         BotHostText.Text = botHost;
     }
 
     /// <summary>Re-points this still-open window at a companion client created for a newly saved bot host.</summary>
+    /// <param name="companionClient">The client for the new bot host, used for Log Out.</param>
     internal void UpdateCompanionClient(CompanionClient companionClient)
     {
         _companionClient = companionClient;
     }
 
     /// <summary>Saves the settings and the run-at-startup choice, showing any failure in the status line.</summary>
+    /// <param name="sender">The Save button (unused).</param>
+    /// <param name="e">Click event data (unused).</param>
     private void SaveButton_Click(object sender, RoutedEventArgs e)
     {
         _settings.StartWithWindows = StartWithWindowsCheckBox.IsChecked == true;
@@ -64,6 +68,8 @@ public partial class SettingsWindow : Window
     /// Logs out, revoking the token on the bot where it can be reached, and returns to the Login
     /// window. If the bot didn't confirm the token was revoked, Settings stays open to say so.
     /// </summary>
+    /// <param name="sender">The Log Out button (unused).</param>
+    /// <param name="e">Click event data (unused).</param>
     private async void LogOutButton_Click(object sender, RoutedEventArgs e)
     {
         IsEnabled = false;
@@ -98,6 +104,8 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>Closes the window.</summary>
+    /// <param name="sender">The Close button (unused).</param>
+    /// <param name="e">Click event data (unused).</param>
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         Close();

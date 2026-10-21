@@ -32,6 +32,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// Creates the app. It lives in the tray and keeps running until the user picks Exit, even after its last window
     /// closes; at startup it opens the login window only if there's no stored login.
     /// </summary>
+    /// <param name="options">The host app's identity, integrations and update settings.</param>
     private CompanionTrayApplication(CompanionTrayAppOptions options)
     {
         _options = options;
@@ -71,6 +72,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     }
 
     /// <summary>Sets up the single-instance guard, settings, companion client, tray icon and updater, then starts listening or shows the Login window.</summary>
+    /// <param name="e">Startup event data, including the command-line arguments (passed on to the base class only).</param>
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -151,6 +153,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     }
 
     /// <summary>Reports an exception that escaped a UI handler as a balloon and keeps the app running, once the tray icon exists.</summary>
+    /// <param name="sender">The event source (unused).</param>
+    /// <param name="e">The unhandled exception; marked handled once it has been reported.</param>
     private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
     {
         // Before the tray icon exists (a startup failure) there is nowhere to report the error,
@@ -165,6 +169,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     }
 
     /// <summary>Shows an otherwise-unhandled error as a balloon (once the tray icon exists).</summary>
+    /// <param name="ex">The exception whose message the balloon shows.</param>
     private void ReportUnhandledError(Exception ex) =>
         _trayIcon?.ShowBalloon($"{_options.DisplayName} hit an error", ex.Message);
 
@@ -207,6 +212,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// Applied before it's saved: if the old token can't be discarded, the change throws with
     /// nothing saved, so the next launch can't send that token to the new server.
     /// </summary>
+    /// <param name="sender">The Login window whose server field changed (unused).</param>
+    /// <param name="newBotHost">The new bot URL the user entered.</param>
     private void OnLoginServerHostChanged(object? sender, string newBotHost)
     {
         ApplyBotHostChange(newBotHost);
@@ -222,6 +229,7 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// in the background so a copy of it stops working there too; a change that keeps the same
     /// server (e.g. only a path) stays logged in.
     /// </summary>
+    /// <param name="newBotHost">The new bot URL; nothing changes if it equals the current one, ignoring case.</param>
     private void ApplyBotHostChange(string newBotHost)
     {
         if (string.Equals(_botHost.OriginalString, newBotHost, StringComparison.OrdinalIgnoreCase))
@@ -274,6 +282,9 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// Waits for the old bot's revoke after a server change (a few seconds at most), says so if it
     /// wasn't confirmed, then disposes the old client, which owns the connection the revoke uses.
     /// </summary>
+    /// <param name="oldClient">The client for the old bot host, disposed once the revoke ends.</param>
+    /// <param name="revoke">The old client's logout, whose result says whether the old bot confirmed the revoke.</param>
+    /// <returns>A task that completes once the old client is disposed; it faults only if the revoke itself threw.</returns>
     private async Task FinishOldServerLogoutAsync(CompanionClient oldClient, Task<LogoutResult> revoke)
     {
         try
@@ -294,6 +305,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// Creates the client for <paramref name="botHost"/>, wires its events to the tray, and
     /// seeds its activity stream with the last activity id shown for that host.
     /// </summary>
+    /// <param name="botHost">The bot's base URL.</param>
+    /// <returns>The new client, not yet listening, after the host's <c>OnClientReady</c> callback has seen it.</returns>
     private CompanionClient CreateCompanionClient(Uri botHost)
     {
         var client = new CompanionClient(botHost, new DpapiFileTokenStore(AppPaths.TokenFile));
@@ -333,14 +346,20 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     // The client is read when the event arrives: a bot-host change can replace _companionClient
     // while the actions run, and the acknowledgement must go to the host the event came from.
     /// <summary>Hands a redemption to the bot-event handler, with the client it arrived on.</summary>
+    /// <param name="sender">The client's event stream (unused).</param>
+    /// <param name="redemption">The channel-point redemption that arrived.</param>
     private void OnRedemptionReceived(object? sender, RedemptionEvent redemption) =>
         _botEvents.OnRedemption(_companionClient, redemption);
 
     /// <summary>Hands a follow/sub/raid/... activity to the bot-event handler.</summary>
+    /// <param name="sender">The client's event stream (unused).</param>
+    /// <param name="activity">The activity event that arrived.</param>
     private void OnActivityReceived(object? sender, CompanionActivityEvent activity) =>
         _botEvents.OnActivity(activity);
 
     /// <summary>Hands an advanced command to the bot-event handler, with the client it arrived on.</summary>
+    /// <param name="sender">The client's event stream (unused).</param>
+    /// <param name="command">The advanced command event that arrived.</param>
     private void OnAdvancedCommandReceived(object? sender, AdvancedCommandEvent command) =>
         _botEvents.OnAdvancedCommand(_companionClient, command);
 
@@ -349,6 +368,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// other settings save. Best-effort: failing to save only means one repeated notification
     /// on the next launch.
     /// </summary>
+    /// <param name="activityKey">The bot host's key, from <see cref="AppSettings.ActivityKey"/>.</param>
+    /// <param name="id">The newest activity event id shown; ignored unless it's above the saved one.</param>
     private void SaveLastActivityEventId(string activityKey, long id)
     {
         if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long saved) && saved >= id)
@@ -368,6 +389,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
 
 
     /// <summary>Shows the connection state on the tray icon; a rejected token is discarded and the Login window opened.</summary>
+    /// <param name="sender">The client's event stream (unused).</param>
+    /// <param name="state">The stream's new connection state.</param>
     private void OnConnectionStateChanged(object? sender, CompanionConnectionState state)
     {
         Dispatcher.Invoke(() =>
@@ -409,6 +432,8 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// silently freeze on its last status with no further events ever
     /// arriving — so surface it and restart listening if we're still logged in.
     /// </summary>
+    /// <param name="sender">The <see cref="CompanionClient"/> whose loop faulted (unused).</param>
+    /// <param name="ex">The exception that ended the loop (unused; the balloon shows a fixed message).</param>
     private void OnListenLoopFaulted(object? sender, Exception ex)
     {
         Dispatcher.Invoke(() =>

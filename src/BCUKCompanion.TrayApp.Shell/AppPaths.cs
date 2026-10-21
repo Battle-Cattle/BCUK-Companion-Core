@@ -8,6 +8,7 @@ internal static class AppPaths
     private static string _folderName = "BCUKCompanion";
 
     /// <summary>Sets the app's data folder name (see <see cref="CompanionTrayAppOptions.DataFolderName"/>); call once at startup.</summary>
+    /// <param name="folderName">The folder name used under both %APPDATA% and %LOCALAPPDATA%.</param>
     public static void Configure(string folderName) => _folderName = folderName;
 
     /// <summary>The settings file, under %APPDATA% (roams with the user's profile).</summary>
