@@ -14,9 +14,18 @@ dotnet_analyzer_diagnostic.category-StyleCop.CSharp.SpecialRules.severity = none
 dotnet_diagnostic.SA1600.severity = error
 dotnet_diagnostic.SA1601.severity = error
 dotnet_diagnostic.SA1602.severity = error
+# Every parameter and return value is documented (SA1611, SA1615), with text (SA1614, SA1616).
+dotnet_diagnostic.SA1611.severity = error
+dotnet_diagnostic.SA1614.severity = error
+dotnet_diagnostic.SA1615.severity = error
+dotnet_diagnostic.SA1616.severity = error
 
 [tests/**.cs]
 # Test projects are exempt: a descriptive test method name documents the behaviour instead.
 dotnet_diagnostic.SA1600.severity = none
 dotnet_diagnostic.SA1601.severity = none
 dotnet_diagnostic.SA1602.severity = none
+dotnet_diagnostic.SA1611.severity = none
+dotnet_diagnostic.SA1614.severity = none
+dotnet_diagnostic.SA1615.severity = none
+dotnet_diagnostic.SA1616.severity = none
