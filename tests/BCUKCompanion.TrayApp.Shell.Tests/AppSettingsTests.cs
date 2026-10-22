@@ -102,6 +102,29 @@ public sealed class AppSettingsTests : IDisposable
         Assert.Equal(expected, AppSettings.ActivityKey(new Uri(botHost)));
     }
 
+    private static void WithBundledFileNextToTheApp(string json, Action test)
+    {
+        // Load() reads appsettings.json from AppContext.BaseDirectory, as the app does at startup.
+        string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        string? original = File.Exists(path) ? File.ReadAllText(path) : null;
+        File.WriteAllText(path, json);
+        try
+        {
+            test();
+        }
+        finally
+        {
+            if (original is null)
+            {
+                File.Delete(path);
+            }
+            else
+            {
+                File.WriteAllText(path, original);
+            }
+        }
+    }
+
     private string WriteBundledFile(string json)
     {
         string directory = Path.Combine(Path.GetTempPath(), folderName + ".bundled");
@@ -131,6 +154,20 @@ public sealed class AppSettingsTests : IDisposable
         AppSettings settings = AppSettings.LoadDefaultsFromBundledConfig(WriteBundledFile(json));
 
         Assert.Equal(new AppSettings().BotHost, settings.BotHost);
+    }
+
+    [Fact]
+    public void Load_NoSavedSettings_UsesTheBundledFileNextToTheApp()
+    {
+        WithBundledFileNextToTheApp("""{ "botHost": "https://bundled.example.org" }""", () =>
+            Assert.Equal("https://bundled.example.org", AppSettings.Load().BotHost));
+    }
+
+    [Fact]
+    public void Load_NoSavedSettingsAndAMalformedBundledFile_KeepsTheHardCodedDefault()
+    {
+        WithBundledFileNextToTheApp("""{ "botHost": 42 }""", () =>
+            Assert.Equal(new AppSettings().BotHost, AppSettings.Load().BotHost));
     }
 
     [Fact]
