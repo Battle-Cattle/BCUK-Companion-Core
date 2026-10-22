@@ -1,5 +1,8 @@
 using System.IO.Compression;
+using System.Net;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
+using BCUKCompanion.Core.Updates;
 using BCUKCompanion.TrayApp.Updates;
 using Xunit;
 
@@ -60,6 +63,42 @@ public sealed class UpdateInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task PrepareAndLaunchAsync_ExtractsTheDownloadedZipAndChecksItBeforeLaunching()
+    {
+        // The zip lacks the running executable, so the install stops before PowerShell starts.
+        string dataFolderName = $"bcuk-update-installer-{Guid.NewGuid():N}";
+        string workRoot = Path.Combine(Path.GetTempPath(), $"{dataFolderName}.Update");
+        byte[] archive = File.ReadAllBytes(CreateZip(("OtherApp.exe", "new")));
+        var handler = new DownloadHandler(archive, Convert.ToHexString(SHA256.HashData(archive)));
+        var checker = new GitHubReleaseUpdateChecker(
+            "Battle-Cattle", "App", new AppVersion(new Version(1, 0, 0), false), new HttpClient(handler));
+        var update = new AvailableUpdate(
+            new Version(1, 1, 0),
+            "v1.1.0",
+            new Uri("https://example.test/update.zip"),
+            new Uri("https://example.test/release"),
+            new Uri("https://example.test/update.zip.sha256"));
+
+        try
+        {
+            var ex = await Assert.ThrowsAsync<InvalidDataException>(
+                () => new UpdateInstaller(checker, dataFolderName).PrepareAndLaunchAsync(update));
+
+            Assert.Equal($"The downloaded update doesn't contain {Path.GetFileName(Environment.ProcessPath)}.", ex.Message);
+            string staged = Assert.Single(Directory.GetFiles(workRoot, "OtherApp.exe", SearchOption.AllDirectories));
+            Assert.Equal("new", File.ReadAllText(staged));
+            Assert.Equal(["/update.zip", "/update.zip.sha256"], handler.Paths);
+        }
+        finally
+        {
+            if (Directory.Exists(workRoot))
+            {
+                Directory.Delete(workRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void ToScriptArguments_PassesEachValueAsItsOwnArgument()
     {
         var request = new ApplyUpdateRequest(1234, @"C:\tmp\files", @"C:\Program Files\My App", @"C:\Program Files\My App\MyApp.exe", @"C:\tmp");
@@ -96,5 +135,20 @@ public sealed class UpdateInstallerTests : IDisposable
         }
 
         return path;
+    }
+
+    private sealed class DownloadHandler(byte[] archive, string checksum) : HttpMessageHandler
+    {
+        public List<string> Paths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            Paths.Add(path);
+            HttpContent content = path.EndsWith(".sha256", StringComparison.Ordinal)
+                ? new StringContent(checksum)
+                : new ByteArrayContent(archive);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        }
     }
 }
