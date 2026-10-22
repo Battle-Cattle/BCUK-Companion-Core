@@ -74,13 +74,13 @@ dotnet test tests/BCUKCompanion.Core.Tests
 ### Building the WPF Shell/Sample on Linux (build yes, run no)
 
 The `Microsoft.NET.Sdk.WindowsDesktop` SDK isn't in the Linux `dotnet-sdk-10.0`
-package, so a plain `dotnet build` of `BCUKCompanion.TrayApp.Shell` or the
-Sample fails with `MSB4236`. Adding `-p:EnableWindowsTargeting=true` makes the
-SDK download the Windows reference packs from NuGet instead, and then the whole
-solution compiles on Linux, analyzers included:
+package. `Directory.Build.props` sets `EnableWindowsTargeting`, so the SDK
+downloads the Windows reference packs from NuGet instead, and the whole solution
+restores and compiles on Linux, analyzers included. GitHub's automatic
+dependency submission relies on that too: it restores every project on Linux.
 
 ```bash
-dotnet build -p:EnableWindowsTargeting=true
+dotnet build
 ```
 
 Nothing that targets `net10.0-windows` can *run* on Linux, because the
@@ -90,7 +90,7 @@ for a local check you can build it, drop that framework from the test host's
 runtimeconfig, and run it on the base runtime:
 
 ```bash
-dotnet build tests/BCUKCompanion.TrayApp.Shell.Tests -p:EnableWindowsTargeting=true
+dotnet build tests/BCUKCompanion.TrayApp.Shell.Tests
 f=$(find tests/BCUKCompanion.TrayApp.Shell.Tests/bin -name '*.Tests.runtimeconfig.json')
 python3 - "$f" <<'PY'
 import json, sys
@@ -164,7 +164,7 @@ Qlty reports function complexity, too many returns, deep nesting, long parameter
 ## ALWAYS: Before committing
 
 ```bash
-dotnet build -p:EnableWindowsTargeting=true && dotnet test tests/BCUKCompanion.Core.Tests
+dotnet build && dotnet test tests/BCUKCompanion.Core.Tests
 ```
 
 The first command builds the whole solution, Shell and Sample included (see above), so a missing doc comment or a compile error anywhere fails it. For a Shell change, also run its tests with the runtimeconfig shortcut above, and let CI's Windows job confirm them before treating the PR as green.
