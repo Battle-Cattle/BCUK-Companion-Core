@@ -169,6 +169,64 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         Assert.True(File.Exists(Path.Combine(installDir, "MyApp.deps.json")));
     }
 
+    [Fact]
+    public void Run_WhenTheDepsJsonPathCannotBeRead_ReportsFailure()
+    {
+        // File.Exists is false for a folder, as it is when access is denied, but something is there.
+        WriteOldBuild();
+        File.Delete(Path.Combine(installDir, "MyApp.deps.json"));
+        Directory.CreateDirectory(Path.Combine(installDir, "MyApp.deps.json"));
+
+        Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
+
+        AssertOnlySatelliteFoldersRemoved();
+        Assert.True(Directory.Exists(Path.Combine(installDir, "MyApp.deps.json")));
+    }
+
+    [SkippableFact]
+    public void Run_WhenDepsJsonAccessIsDenied_KeepsTheFilesItLists()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw new SkipException("Denying read access needs ACLs on Windows; the locked-file test covers it there.");
+        }
+
+        WriteOldBuild();
+        string depsFile = Path.Combine(installDir, "MyApp.deps.json");
+        File.SetUnixFileMode(depsFile, UnixFileMode.None);
+        try
+        {
+            Skip.If(CanRead(depsFile), "This user can read a file with no permissions (e.g. root), so access can't be denied here.");
+
+            Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
+
+            AssertOnlySatelliteFoldersRemoved();
+        }
+        finally
+        {
+            File.SetUnixFileMode(depsFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        Assert.True(File.Exists(depsFile));
+    }
+
+    [SkippableFact]
+    public void Run_WhenDepsJsonIsLocked_KeepsTheFilesItListsAndRetriesNextLaunch()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Only Windows enforces FileShare.None against other readers.");
+        WriteOldBuild();
+        string depsFile = Path.Combine(installDir, "MyApp.deps.json");
+
+        using (File.Open(depsFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
+            AssertOnlySatelliteFoldersRemoved();
+        }
+
+        Assert.True(LegacyInstallCleanup.Run(installDir, "MyApp"));
+        Assert.False(File.Exists(depsFile));
+    }
+
     [SkippableFact]
     public void Run_WhenAFileIsLocked_KeepsDepsJsonSoTheNextLaunchRetries()
     {
@@ -200,6 +258,25 @@ public sealed class LegacyInstallCleanupTests : IDisposable
             LegacyInstallCleanup.GetStaleFiles(installDir, "MyApp"));
     }
 
+    // The deps.json couldn't be read, so nothing it lists is removed, except the satellite folders
+    // the shape-based cleanup always removes (a single-file build never needs them).
+    private void AssertOnlySatelliteFoldersRemoved()
+    {
+        Assert.Equal(
+            new[]
+            {
+                "BCUKCompanion.Core.dll", "BCUKCompanion.Core.pdb", "MyApp.dll", "MyApp.exe", "MyApp.pdb",
+                "MyApp.runtimeconfig.json", "PresentationCore.dll", "System.Private.CoreLib.dll", "appsettings.json",
+                "coreclr.dll", "wpfgfx_cor3.dll",
+            }.Order(StringComparer.OrdinalIgnoreCase),
+            Directory.EnumerateFiles(installDir, "*", SearchOption.AllDirectories)
+                .Select(f => Path.GetRelativePath(installDir, f))
+                .Where(f => !f.StartsWith("MyApp.deps.json", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.OrdinalIgnoreCase));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "cs")));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "zh-Hans")));
+    }
+
     private void WriteOldBuild()
     {
         File.WriteAllText(Path.Combine(installDir, "MyApp.deps.json"), DepsJson);
@@ -215,6 +292,19 @@ public sealed class LegacyInstallCleanupTests : IDisposable
 
         Touch("cs", "PresentationCore.resources.dll");
         Touch("zh-Hans", "PresentationCore.resources.dll");
+    }
+
+    private static bool CanRead(string path)
+    {
+        try
+        {
+            File.ReadAllBytes(path);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void Touch(params string[] parts)
