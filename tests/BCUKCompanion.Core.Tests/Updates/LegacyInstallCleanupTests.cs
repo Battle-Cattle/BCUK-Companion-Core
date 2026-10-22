@@ -169,6 +169,64 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         Assert.True(File.Exists(Path.Combine(installDir, "MyApp.deps.json")));
     }
 
+    [Fact]
+    public void Run_WhenTheDepsJsonPathCannotBeRead_ReportsFailure()
+    {
+        // File.Exists is false for a folder, as it is when access is denied, but something is there.
+        WriteOldBuild();
+        File.Delete(Path.Combine(installDir, "MyApp.deps.json"));
+        Directory.CreateDirectory(Path.Combine(installDir, "MyApp.deps.json"));
+
+        Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
+
+        Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+        Assert.True(Directory.Exists(Path.Combine(installDir, "MyApp.deps.json")));
+    }
+
+    [SkippableFact]
+    public void Run_WhenDepsJsonAccessIsDenied_KeepsEverything()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw new SkipException("Denying read access needs ACLs on Windows; the locked-file test covers it there.");
+        }
+
+        WriteOldBuild();
+        string depsFile = Path.Combine(installDir, "MyApp.deps.json");
+        File.SetUnixFileMode(depsFile, UnixFileMode.None);
+        try
+        {
+            Skip.If(CanRead(depsFile), "This user can read a file with no permissions (e.g. root), so access can't be denied here.");
+
+            Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
+
+            Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+        }
+        finally
+        {
+            File.SetUnixFileMode(depsFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        Assert.True(File.Exists(depsFile));
+    }
+
+    [SkippableFact]
+    public void Run_WhenDepsJsonIsLocked_KeepsEverythingAndRetriesNextLaunch()
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Only Windows enforces FileShare.None against other readers.");
+        WriteOldBuild();
+        string depsFile = Path.Combine(installDir, "MyApp.deps.json");
+
+        using (File.Open(depsFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
+            Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+        }
+
+        Assert.True(LegacyInstallCleanup.Run(installDir, "MyApp"));
+        Assert.False(File.Exists(depsFile));
+    }
+
     [SkippableFact]
     public void Run_WhenAFileIsLocked_KeepsDepsJsonSoTheNextLaunchRetries()
     {
@@ -215,6 +273,19 @@ public sealed class LegacyInstallCleanupTests : IDisposable
 
         Touch("cs", "PresentationCore.resources.dll");
         Touch("zh-Hans", "PresentationCore.resources.dll");
+    }
+
+    private static bool CanRead(string path)
+    {
+        try
+        {
+            File.ReadAllBytes(path);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void Touch(params string[] parts)

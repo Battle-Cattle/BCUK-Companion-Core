@@ -28,25 +28,25 @@ public static class LegacyInstallCleanup
     /// </summary>
     /// <param name="installDir">The folder the running executable is in.</param>
     /// <param name="appName">The executable's name without <c>.exe</c>, e.g. <c>MyApp</c>.</param>
-    /// <returns>True if nothing stale is left that the cleanup could see; false if something couldn't be deleted (and is retried next launch). A deps.json that <see cref="File.Exists(string)"/> can't see (e.g. access is denied) counts as absent, so its listed files aren't removed and true can still be returned.</returns>
+    /// <returns>True if nothing stale is left that the cleanup could see; false if something couldn't be deleted, or the deps.json exists but couldn't be read (access denied, locked, not a file or not valid). Either way it's retried next launch. Only a deps.json that genuinely isn't there counts as nothing to remove.</returns>
     public static bool Run(string installDir, string appName) =>
         RemoveListedFiles(installDir, appName) & RemoveUnlistedRuntimeFiles(installDir);
 
     /// <summary>Deletes the files the old build's deps.json lists (see <see cref="GetStaleFiles"/>), then any locale folders left empty.</summary>
     /// <param name="installDir">The folder the running executable is in.</param>
     /// <param name="appName">The executable's name without <c>.exe</c>, which names its deps.json.</param>
-    /// <returns>False if anything listed couldn't be deleted; true when everything listed is gone or there's no deps.json that <see cref="File.Exists(string)"/> can see.</returns>
+    /// <returns>True when everything listed is gone or there's no deps.json; false if anything listed couldn't be deleted or the deps.json couldn't be read.</returns>
     private static bool RemoveListedFiles(string installDir, string appName)
     {
         string depsFile = Path.Combine(installDir, $"{appName}.deps.json");
-        if (!File.Exists(depsFile))
+        var (exists, depsEntries) = LoadDepsEntries(depsFile);
+        if (!exists)
         {
             return true;
         }
 
         // An unreadable deps.json is kept rather than lose the only record of what to remove.
-        var entries = ReadDepsEntries(depsFile);
-        if (entries is null)
+        if (depsEntries is not { } entries)
         {
             return false;
         }
@@ -75,7 +75,7 @@ public static class LegacyInstallCleanup
     /// <param name="appName">The executable's name without <c>.exe</c>, e.g. <c>MyApp</c>.</param>
     /// <returns>The full paths of the stale files that exist, sorted case-insensitively.</returns>
     public static IReadOnlyList<string> GetStaleFiles(string installDir, string appName) =>
-        ExistingStaleFiles(installDir, appName, ReadDepsEntries(Path.Combine(installDir, $"{appName}.deps.json")) ?? []);
+        ExistingStaleFiles(installDir, appName, LoadDepsEntries(Path.Combine(installDir, $"{appName}.deps.json")).Entries ?? []);
 
     /// <summary>The files <paramref name="entries"/> name (plus each DLL's PDB and the app's own PDB) that exist, never the executable or appsettings.json.</summary>
     /// <param name="installDir">The folder the running executable is in.</param>
@@ -117,16 +117,45 @@ public static class LegacyInstallCleanup
     /// Each "runtime"/"native" entry is a file in the install folder and each "resources" entry a
     /// file in its locale's subfolder; package paths such as lib/net10.0/Foo.dll are flattened on
     /// publish, so only the file name is kept. Only the target the old build ran with (its
-    /// runtimeTarget) is read, and paths that are rooted or contain "." or ".." are skipped. Null
-    /// if the file is missing, can't be parsed or has no such target.
+    /// runtimeTarget) is read, and paths that are rooted or contain "." or ".." are skipped.
     /// </summary>
+    /// <remarks>
+    /// The file is opened rather than checked with <see cref="File.Exists(string)"/> first, which
+    /// also returns false when access is denied. Only a missing file or folder counts as absent.
+    /// </remarks>
     /// <param name="depsFile">The full path of the old build's <c>&lt;app&gt;.deps.json</c>.</param>
-    /// <returns>The listed files, each with its locale folder (null for the install folder itself) and file name; null when the file can't be read.</returns>
-    private static List<(string? Locale, string FileName)>? ReadDepsEntries(string depsFile)
+    /// <returns>
+    /// Whether something is at that path, and the listed files, each with its locale folder (null
+    /// for the install folder itself) and file name. Entries is null when the file is missing,
+    /// can't be read or parsed, or has no such target.
+    /// </returns>
+    private static (bool Exists, List<(string? Locale, string FileName)>? Entries) LoadDepsEntries(string depsFile)
+    {
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(depsFile);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return (false, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (true, null);
+        }
+
+        return (true, ParseDepsEntries(bytes));
+    }
+
+    /// <summary>The files a deps.json's active target lists (see <see cref="LoadDepsEntries"/>).</summary>
+    /// <param name="depsJson">The deps.json's contents.</param>
+    /// <returns>The listed files, each with its locale folder and file name; null when the JSON isn't valid or has no active target.</returns>
+    private static List<(string? Locale, string FileName)>? ParseDepsEntries(byte[] depsJson)
     {
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(depsFile));
+            using var doc = JsonDocument.Parse(depsJson);
             if (GetActiveTarget(doc.RootElement) is not { } target)
             {
                 return null;
@@ -136,7 +165,7 @@ public static class LegacyInstallCleanup
                 .SelectMany(library => ReadLibraryEntries(library.Value))
                 .ToList();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+        catch (JsonException)
         {
             return null;
         }
