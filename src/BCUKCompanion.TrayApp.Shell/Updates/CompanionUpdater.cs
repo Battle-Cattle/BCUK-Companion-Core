@@ -1,9 +1,5 @@
-using System.Diagnostics;
 using System.Reflection;
-using System.Windows;
 using BCUKCompanion.Core.Updates;
-using Application = System.Windows.Application;
-using MessageBox = System.Windows.MessageBox;
 
 namespace BCUKCompanion.TrayApp.Updates;
 
@@ -16,10 +12,9 @@ namespace BCUKCompanion.TrayApp.Updates;
 internal sealed class CompanionUpdater
 {
     private readonly GitHubReleaseUpdateChecker checker;
-    private readonly UpdateInstaller installer;
+    private readonly Func<AvailableUpdate, Task> install;
     private readonly string displayName;
-    private readonly string caption;
-    private readonly Action<string, string> showBalloon;
+    private readonly IUpdateUi ui;
 
     // Interlocked-guarded: 1 while a check/install is in flight, so a menu click during the
     // launch check (or a double click) doesn't start a second download.
@@ -31,14 +26,45 @@ internal sealed class CompanionUpdater
     /// <param name="dataFolderName">The app's data folder, where the update is staged.</param>
     /// <param name="showBalloon">Shows a tray balloon (title, text).</param>
     public CompanionUpdater(CompanionUpdateOptions options, string displayName, string dataFolderName, Action<string, string> showBalloon)
+        : this(CreateChecker(options), displayName, dataFolderName, showBalloon)
+    {
+    }
+
+    /// <summary>Creates an updater that installs with an <see cref="UpdateInstaller"/> and prompts with WPF message boxes.</summary>
+    /// <param name="checker">Finds and downloads releases.</param>
+    /// <param name="displayName">The app's name, for messages.</param>
+    /// <param name="dataFolderName">The app's data folder, where the update is staged.</param>
+    /// <param name="showBalloon">Shows a tray balloon (title, text).</param>
+    private CompanionUpdater(GitHubReleaseUpdateChecker checker, string displayName, string dataFolderName, Action<string, string> showBalloon)
+        : this(
+            checker,
+            update => new UpdateInstaller(checker, dataFolderName).PrepareAndLaunchAsync(update),
+            displayName,
+            new WpfUpdateUi($"{displayName} updates", showBalloon))
+    {
+    }
+
+    /// <summary>Creates an updater with the given installer and UI, so tests can stand in for both.</summary>
+    /// <param name="checker">Finds releases; its <see cref="GitHubReleaseUpdateChecker.CurrentVersion"/> decides whether this build updates itself.</param>
+    /// <param name="install">Downloads a release and starts the script that swaps it in; throws if it can't.</param>
+    /// <param name="displayName">The app's name, for messages.</param>
+    /// <param name="ui">Shows messages and balloons, asks questions and shuts the app down.</param>
+    internal CompanionUpdater(GitHubReleaseUpdateChecker checker, Func<AvailableUpdate, Task> install, string displayName, IUpdateUi ui)
+    {
+        this.checker = checker;
+        this.install = install;
+        this.displayName = displayName;
+        this.ui = ui;
+    }
+
+    /// <summary>The release checker for the running app, whose version comes from the host's entry assembly.</summary>
+    /// <param name="options">Which GitHub repository's releases to update from.</param>
+    /// <returns>A checker for that repository's releases.</returns>
+    private static GitHubReleaseUpdateChecker CreateChecker(CompanionUpdateOptions options)
     {
         // The host's exe, not this library, carries the version the release workflow stamps.
         var version = AppVersion.FromAssembly(Assembly.GetEntryAssembly() ?? typeof(CompanionUpdater).Assembly);
-        checker = new GitHubReleaseUpdateChecker(options.RepoOwner, options.RepoName, version, assetSuffix: options.AssetSuffix);
-        installer = new UpdateInstaller(checker, dataFolderName);
-        this.displayName = displayName;
-        caption = $"{displayName} updates";
-        this.showBalloon = showBalloon;
+        return new GitHubReleaseUpdateChecker(options.RepoOwner, options.RepoName, version, assetSuffix: options.AssetSuffix);
     }
 
     /// <summary>The "Check for updates..." tray menu item, which checks now and reports the result.</summary>
@@ -64,13 +90,13 @@ internal sealed class CompanionUpdater
     /// </summary>
     /// <param name="interactive">True for a menu click, which reports every outcome; false for the silent launch check.</param>
     /// <returns>A task that completes once the check (and any install) is done; it never faults.</returns>
-    private async Task RunAsync(bool interactive)
+    internal async Task RunAsync(bool interactive)
     {
         if (Interlocked.Exchange(ref busy, 1) == 1)
         {
             if (interactive)
             {
-                MessageBox.Show("An update check is already in progress.", caption);
+                ui.ShowMessage("An update check is already in progress.");
             }
             return;
         }
@@ -118,7 +144,7 @@ internal sealed class CompanionUpdater
 
         if (interactive && message is not null)
         {
-            MessageBox.Show(message, caption);
+            ui.ShowMessage(message);
         }
         return update;
     }
@@ -126,9 +152,8 @@ internal sealed class CompanionUpdater
     /// <summary>Asks the user whether to install <paramref name="update"/> now.</summary>
     /// <param name="update">The newer release found by the check.</param>
     /// <returns>True when the user clicked Yes; otherwise false.</returns>
-    private bool ConfirmInstall(AvailableUpdate update) => MessageBox.Show(
-        $"Version {update.Version} is available (you have {checker.CurrentVersion}).\n\nInstall it now? The app will restart.",
-        caption, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+    private bool ConfirmInstall(AvailableUpdate update) => ui.Confirm(
+        $"Version {update.Version} is available (you have {checker.CurrentVersion}).\n\nInstall it now? The app will restart.");
 
     /// <summary>Downloads and verifies <paramref name="update"/>, launches the script that swaps it in, then shuts the app down so the script can replace it.</summary>
     /// <param name="update">The release to install.</param>
@@ -136,10 +161,10 @@ internal sealed class CompanionUpdater
     /// <returns>A task that completes once shutdown is queued, or once a failure has been reported; it never faults.</returns>
     private async Task InstallAsync(AvailableUpdate update, bool interactive)
     {
-        showBalloon($"Updating {displayName}", $"Downloading v{update.Version}. The app will restart when it's ready.");
+        ui.ShowBalloon($"Updating {displayName}", $"Downloading v{update.Version}. The app will restart when it's ready.");
         try
         {
-            await installer.PrepareAndLaunchAsync(update);
+            await install(update);
         }
         catch (Exception ex)
         {
@@ -147,10 +172,7 @@ internal sealed class CompanionUpdater
             return;
         }
 
-        // Once idle, so queued work like the activity-id save runs first; the update script
-        // waits for this process to exit.
-        _ = Application.Current.Dispatcher.InvokeAsync(
-            () => Application.Current.Shutdown(), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        ui.Shutdown();
     }
 
     /// <summary>Tells the user an install failed: a balloon for the launch check, or a message box offering the download page for a menu click.</summary>
@@ -165,15 +187,14 @@ internal sealed class CompanionUpdater
 
         if (!interactive)
         {
-            showBalloon("Update failed", $"Couldn't install v{update.Version}: {reason}");
+            ui.ShowBalloon("Update failed", $"Couldn't install v{update.Version}: {reason}");
             return;
         }
 
-        if (MessageBox.Show($"Couldn't install v{update.Version}:\n{reason}\n\nOpen the download page?",
-                caption, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes)
+        if (ui.ConfirmWarning($"Couldn't install v{update.Version}:\n{reason}\n\nOpen the download page?"))
         {
             // GitHubReleaseUpdateChecker only ever returns an https release page URL.
-            Process.Start(new ProcessStartInfo(update.ReleasePageUrl.AbsoluteUri) { UseShellExecute = true })?.Dispose();
+            ui.OpenUrl(update.ReleasePageUrl);
         }
     }
 }
