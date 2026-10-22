@@ -37,7 +37,7 @@ public sealed class AppSettings
     /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
     /// missing, unreadable or has an invalid bot host.
     /// </summary>
-    /// <returns>The saved settings, or defaults when they can't be used; never null. A bundled appsettings.json whose root isn't a JSON object, or whose <c>botHost</c> is neither a string nor JSON null, throws <see cref="InvalidOperationException"/>.</returns>
+    /// <returns>The saved settings, or defaults when they can't be used; never null.</returns>
     public static AppSettings Load()
     {
         try
@@ -59,7 +59,7 @@ public sealed class AppSettings
             // Fall through to defaults — a corrupt settings file shouldn't block startup.
         }
 
-        return LoadDefaultsFromBundledConfig();
+        return LoadDefaultsFromBundledConfig(Path.Combine(AppContext.BaseDirectory, "appsettings.json"));
     }
 
     /// <summary>Whether <paramref name="botHost"/> is an absolute https URL, as the companion API requires.</summary>
@@ -69,23 +69,18 @@ public sealed class AppSettings
         Uri.TryCreate(botHost, UriKind.Absolute, out Uri? uri)
         && uri.Scheme == Uri.UriSchemeHttps;
 
-    /// <summary>New settings with <see cref="BotHost"/> taken from the appsettings.json shipped next to the executable, when it holds a valid one.</summary>
-    /// <returns>New settings; <see cref="BotHost"/> keeps its hard-coded default if the bundled file is missing, unreadable, not valid JSON, or has no https <c>botHost</c> string. A JSON root that isn't an object, or a <c>botHost</c> that's neither a string nor JSON null, throws <see cref="InvalidOperationException"/>.</returns>
-    private static AppSettings LoadDefaultsFromBundledConfig()
+    /// <summary>New settings with <see cref="BotHost"/> taken from the bundled appsettings.json, when it holds a valid one.</summary>
+    /// <param name="bundledPath">Path to the appsettings.json shipped next to the executable.</param>
+    /// <returns>New settings; <see cref="BotHost"/> keeps its hard-coded default if the file is missing, unreadable, not valid JSON, not a JSON object, or has no https <c>botHost</c> string.</returns>
+    internal static AppSettings LoadDefaultsFromBundledConfig(string bundledPath)
     {
         var settings = new AppSettings();
         try
         {
-            string bundledPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
-            if (File.Exists(bundledPath))
+            if (File.Exists(bundledPath)
+                && ReadBundledBotHost(File.ReadAllText(bundledPath)) is string bundledBotHost)
             {
-                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(bundledPath));
-                if (document.RootElement.TryGetProperty("botHost", out JsonElement botHostElement)
-                    && botHostElement.GetString() is string bundledBotHost
-                    && IsValidBotHost(bundledBotHost))
-                {
-                    settings.BotHost = bundledBotHost;
-                }
+                settings.BotHost = bundledBotHost;
             }
         }
         catch (Exception ex) when (ex is IOException or JsonException)
@@ -94,6 +89,28 @@ public sealed class AppSettings
         }
 
         return settings;
+    }
+
+    /// <summary>
+    /// The <c>botHost</c> from a bundled appsettings.json. The file ships with each app, so a wrong
+    /// shape is a packaging mistake; it's treated as "no bot host" rather than failing startup.
+    /// </summary>
+    /// <param name="json">The bundled file's contents.</param>
+    /// <returns>The <c>botHost</c> when the root is an object and it's an https URL string; otherwise null.</returns>
+    /// <exception cref="JsonException">The text isn't valid JSON.</exception>
+    private static string? ReadBundledBotHost(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object
+            || !root.TryGetProperty("botHost", out JsonElement botHostElement)
+            || botHostElement.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        string? botHost = botHostElement.GetString();
+        return botHost is not null && IsValidBotHost(botHost) ? botHost : null;
     }
 
     /// <summary>Writes these settings to settings.json atomically (temp file, then swap).</summary>
