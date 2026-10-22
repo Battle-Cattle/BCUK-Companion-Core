@@ -9,7 +9,7 @@ namespace BCUKCompanion.TrayApp.Updates;
 /// <summary>
 /// Installs a downloaded release in place: the zip is extracted to a temp folder, then a small
 /// PowerShell script waits for this process to exit, copies the new files over the install folder
-/// and relaunches the app. No WPF dependency, so <see cref="CompanionUpdater"/> owns all prompts.
+/// and relaunches the app. No WPF dependency: <see cref="CompanionUpdater"/> owns all prompts, through <see cref="IUpdateUi"/>.
 /// </summary>
 internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string dataFolderName)
 {
@@ -40,12 +40,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
 
         string zipPath = Path.Combine(workDir, "update.zip");
         await checker.DownloadAsync(update, zipPath, cancellationToken).ConfigureAwait(false);
-
-        ZipFile.ExtractToDirectory(zipPath, stagingDir);
-        if (!File.Exists(Path.Combine(stagingDir, Path.GetFileName(exePath))))
-        {
-            throw new InvalidDataException($"The downloaded update doesn't contain {Path.GetFileName(exePath)}.");
-        }
+        ExtractAndVerify(zipPath, stagingDir, Path.GetFileName(exePath));
 
         string scriptPath = Path.Combine(workDir, "apply-update.ps1");
         await File.WriteAllTextAsync(scriptPath, ApplyUpdateScript, cancellationToken).ConfigureAwait(false);
@@ -56,12 +51,8 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        foreach (string arg in new[]
-        {
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", scriptPath,
-            "-ProcessId", Environment.ProcessId.ToString(CultureInfo.InvariantCulture),
-            "-Source", stagingDir, "-Target", installDir, "-Exe", exePath, "-WorkDir", workDir,
-        })
+        foreach (string arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", scriptPath }
+            .Concat(new ApplyUpdateRequest(Environment.ProcessId, stagingDir, installDir, exePath, workDir).ToScriptArguments()))
         {
             startInfo.ArgumentList.Add(arg);
         }
@@ -69,22 +60,40 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
         Process.Start(startInfo)?.Dispose();
     }
 
-    // Waits for the app to exit (releasing its file locks and single-instance mutex), backs up the
-    // install folder, then copies the new build over it, retrying in case antivirus briefly holds
-    // a file. If anything fails part-way, the backup is copied back so the previous version still
-    // starts, and the work folder (with the backup and an update-failed.log) is kept for manual
-    // recovery. If the restore fails too, the folder may hold a mix of both builds, so the app is
-    // not relaunched; restore-failed.log records why. If the app never exits, nothing is touched.
-    // Files the new build no longer ships are left in place rather than mirroring, so nothing a
-    // user dropped into the folder gets deleted; the leftovers of an older multi-file build are
-    // removed by the new build itself on launch (LegacyInstallCleanup).
-    private const string ApplyUpdateScript = """
+    /// <summary>Extracts the downloaded zip and checks it holds the app's executable, so a wrong or broken release is never swapped in.</summary>
+    /// <param name="zipPath">The downloaded, checksum-verified release zip.</param>
+    /// <param name="stagingDir">The empty folder to extract it into.</param>
+    /// <param name="exeName">The running executable's file name, e.g. <c>MyApp.exe</c>.</param>
+    /// <exception cref="InvalidDataException">The zip doesn't contain <paramref name="exeName"/> at its root.</exception>
+    internal static void ExtractAndVerify(string zipPath, string stagingDir, string exeName)
+    {
+        ZipFile.ExtractToDirectory(zipPath, stagingDir);
+        if (!File.Exists(Path.Combine(stagingDir, exeName)))
+        {
+            throw new InvalidDataException($"The downloaded update doesn't contain {exeName}.");
+        }
+    }
+
+    /// <summary>
+    /// Waits for the app to exit (releasing its file locks and single-instance mutex), backs up the
+    /// install folder, then copies the new build over it, retrying in case antivirus briefly holds
+    /// a file. If anything fails part-way, the backup is copied back so the previous version still
+    /// starts, and the work folder (with the backup and an update-failed.log) is kept for manual
+    /// recovery. If the restore fails too, the folder may hold a mix of both builds, so the app is
+    /// not relaunched; restore-failed.log records why. If the app hasn't exited within WaitSeconds,
+    /// nothing is touched. Exits 1 when it doesn't relaunch the app, 0 when it does.
+    /// Files the new build no longer ships are left in place rather than mirroring, so nothing a
+    /// user dropped into the folder gets deleted; the leftovers of an older multi-file build are
+    /// removed by the new build itself on launch (LegacyInstallCleanup).
+    /// </summary>
+    internal const string ApplyUpdateScript = """
         param(
             [int]$ProcessId,
             [string]$Source,
             [string]$Target,
             [string]$Exe,
-            [string]$WorkDir
+            [string]$WorkDir,
+            [int]$WaitSeconds = 60
         )
         $ErrorActionPreference = 'Stop'
 
@@ -105,7 +114,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             try { $Record | Out-File -FilePath (Join-Path $WorkDir $Name) -Force } catch { }
         }
 
-        try { Wait-Process -Id $ProcessId -Timeout 60 } catch { }
+        try { Wait-Process -Id $ProcessId -Timeout $WaitSeconds } catch { }
         if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
             exit 1
         }
@@ -136,11 +145,12 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
         if ($updated) {
             Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
         }
+        exit 0
         """;
 
     /// <summary>Throws <see cref="UnauthorizedAccessException"/> unless a file can be created in <paramref name="directory"/>, so an install under e.g. Program Files fails before anything is downloaded.</summary>
     /// <param name="directory">The install folder to probe with a temporary file.</param>
-    private static void EnsureWritable(string directory)
+    internal static void EnsureWritable(string directory)
     {
         string probe = Path.Combine(directory, $".update-probe-{Guid.NewGuid():N}");
         try
