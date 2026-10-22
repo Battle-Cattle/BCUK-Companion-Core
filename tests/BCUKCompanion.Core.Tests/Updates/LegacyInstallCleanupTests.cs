@@ -179,12 +179,12 @@ public sealed class LegacyInstallCleanupTests : IDisposable
 
         Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
 
-        Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+        AssertOnlySatelliteFoldersRemoved();
         Assert.True(Directory.Exists(Path.Combine(installDir, "MyApp.deps.json")));
     }
 
     [SkippableFact]
-    public void Run_WhenDepsJsonAccessIsDenied_KeepsEverything()
+    public void Run_WhenDepsJsonAccessIsDenied_KeepsTheFilesItLists()
     {
         if (OperatingSystem.IsWindows())
         {
@@ -200,7 +200,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
 
             Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
 
-            Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+            AssertOnlySatelliteFoldersRemoved();
         }
         finally
         {
@@ -211,7 +211,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
     }
 
     [SkippableFact]
-    public void Run_WhenDepsJsonIsLocked_KeepsEverythingAndRetriesNextLaunch()
+    public void Run_WhenDepsJsonIsLocked_KeepsTheFilesItListsAndRetriesNextLaunch()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Only Windows enforces FileShare.None against other readers.");
         WriteOldBuild();
@@ -220,7 +220,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         using (File.Open(depsFile, FileMode.Open, FileAccess.Read, FileShare.None))
         {
             Assert.False(LegacyInstallCleanup.Run(installDir, "MyApp"));
-            Assert.True(File.Exists(Path.Combine(installDir, "coreclr.dll")));
+            AssertOnlySatelliteFoldersRemoved();
         }
 
         Assert.True(LegacyInstallCleanup.Run(installDir, "MyApp"));
@@ -256,6 +256,25 @@ public sealed class LegacyInstallCleanupTests : IDisposable
                 "wpfgfx_cor3.dll", Path.Combine("zh-Hans", "PresentationCore.resources.dll"),
             }.Select(f => Path.Combine(installDir, f)).Order(StringComparer.OrdinalIgnoreCase),
             LegacyInstallCleanup.GetStaleFiles(installDir, "MyApp"));
+    }
+
+    // The deps.json couldn't be read, so nothing it lists is removed, except the satellite folders
+    // the shape-based cleanup always removes (a single-file build never needs them).
+    private void AssertOnlySatelliteFoldersRemoved()
+    {
+        Assert.Equal(
+            new[]
+            {
+                "BCUKCompanion.Core.dll", "BCUKCompanion.Core.pdb", "MyApp.dll", "MyApp.exe", "MyApp.pdb",
+                "MyApp.runtimeconfig.json", "PresentationCore.dll", "System.Private.CoreLib.dll", "appsettings.json",
+                "coreclr.dll", "wpfgfx_cor3.dll",
+            }.Order(StringComparer.OrdinalIgnoreCase),
+            Directory.EnumerateFiles(installDir, "*", SearchOption.AllDirectories)
+                .Select(f => Path.GetRelativePath(installDir, f))
+                .Where(f => !f.StartsWith("MyApp.deps.json", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.OrdinalIgnoreCase));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "cs")));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "zh-Hans")));
     }
 
     private void WriteOldBuild()

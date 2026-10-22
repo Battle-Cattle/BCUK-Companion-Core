@@ -28,7 +28,7 @@ public static class LegacyInstallCleanup
     /// </summary>
     /// <param name="installDir">The folder the running executable is in.</param>
     /// <param name="appName">The executable's name without <c>.exe</c>, e.g. <c>MyApp</c>.</param>
-    /// <returns>True if nothing stale is left that the cleanup could see; false if something couldn't be deleted, or the deps.json exists but couldn't be read (access denied, locked, not a file or not valid). Either way it's retried next launch. Only a deps.json that genuinely isn't there counts as nothing to remove.</returns>
+    /// <returns>True if nothing stale is left that the cleanup could see; false if something couldn't be deleted, or the deps.json exists but couldn't be read (access denied, locked, not a file or not valid). Either way it's retried next launch, and an unreadable deps.json keeps every file it lists. Only a deps.json that genuinely isn't there counts as nothing to remove. The shape-based cleanup (satellite folders and <c>mscordaccore_*.dll</c>) runs regardless, since a single-file build never needs those.</returns>
     public static bool Run(string installDir, string appName) =>
         RemoveListedFiles(installDir, appName) & RemoveUnlistedRuntimeFiles(installDir);
 
