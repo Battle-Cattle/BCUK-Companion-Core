@@ -13,6 +13,12 @@ public sealed class AppSettingsTests : IDisposable
 
     public void Dispose()
     {
+        string bundled = Path.Combine(Path.GetTempPath(), folderName + ".bundled");
+        if (Directory.Exists(bundled))
+        {
+            Directory.Delete(bundled, recursive: true);
+        }
+
         string? directory = Path.GetDirectoryName(AppPaths.SettingsFile);
         if (directory is not null && Directory.Exists(directory))
         {
@@ -94,5 +100,90 @@ public sealed class AppSettingsTests : IDisposable
     public void ActivityKey_IsSchemeHostAndPortOnly(string botHost, string expected)
     {
         Assert.Equal(expected, AppSettings.ActivityKey(new Uri(botHost)));
+    }
+
+    private static void WithBundledFileNextToTheApp(string json, Action test)
+    {
+        // Load() reads appsettings.json from AppContext.BaseDirectory, as the app does at startup.
+        string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        string? original = File.Exists(path) ? File.ReadAllText(path) : null;
+        File.WriteAllText(path, json);
+        try
+        {
+            test();
+        }
+        finally
+        {
+            if (original is null)
+            {
+                File.Delete(path);
+            }
+            else
+            {
+                File.WriteAllText(path, original);
+            }
+        }
+    }
+
+    private string WriteBundledFile(string json)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), folderName + ".bundled");
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "appsettings.json");
+        File.WriteAllText(path, json);
+        return path;
+    }
+
+    [Theory]
+    [InlineData("[]")]
+    [InlineData("\"https://bot.example.org\"")]
+    [InlineData("42")]
+    [InlineData("true")]
+    [InlineData("null")]
+    [InlineData("""{ "botHost": 42 }""")]
+    [InlineData("""{ "botHost": false }""")]
+    [InlineData("""{ "botHost": { "url": "https://bot.example.org" } }""")]
+    [InlineData("""{ "botHost": ["https://bot.example.org"] }""")]
+    [InlineData("""{ "botHost": null }""")]
+    [InlineData("""{ }""")]
+    [InlineData("""{ "botHost": "not a url" }""")]
+    [InlineData("""{ "botHost": "http://insecure.example.org" }""")]
+    [InlineData("{ not json")]
+    public void LoadDefaultsFromBundledConfig_UnusableShape_KeepsTheHardCodedDefault(string json)
+    {
+        AppSettings settings = AppSettings.LoadDefaultsFromBundledConfig(WriteBundledFile(json));
+
+        Assert.Equal(new AppSettings().BotHost, settings.BotHost);
+    }
+
+    [Fact]
+    public void Load_NoSavedSettings_UsesTheBundledFileNextToTheApp()
+    {
+        WithBundledFileNextToTheApp("""{ "botHost": "https://bundled.example.org" }""", () =>
+            Assert.Equal("https://bundled.example.org", AppSettings.Load().BotHost));
+    }
+
+    [Fact]
+    public void Load_NoSavedSettingsAndAMalformedBundledFile_KeepsTheHardCodedDefault()
+    {
+        WithBundledFileNextToTheApp("""{ "botHost": 42 }""", () =>
+            Assert.Equal(new AppSettings().BotHost, AppSettings.Load().BotHost));
+    }
+
+    [Fact]
+    public void LoadDefaultsFromBundledConfig_HttpsBotHost_OverridesTheDefault()
+    {
+        AppSettings settings = AppSettings.LoadDefaultsFromBundledConfig(
+            WriteBundledFile("""{ "botHost": "https://bundled.example.org" }"""));
+
+        Assert.Equal("https://bundled.example.org", settings.BotHost);
+    }
+
+    [Fact]
+    public void LoadDefaultsFromBundledConfig_MissingFile_KeepsTheHardCodedDefault()
+    {
+        string path = Path.Combine(Path.GetTempPath(), folderName + ".missing", "appsettings.json");
+
+        Assert.Equal(new AppSettings().BotHost, AppSettings.LoadDefaultsFromBundledConfig(path).BotHost);
     }
 }
