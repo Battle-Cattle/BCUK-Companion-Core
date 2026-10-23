@@ -203,8 +203,9 @@ public class AckProgressPingerTests
         }
         finally
         {
-            // Stop the ping loop even if the wait timed out.
+            // Stop the ping loop, and wait for it to stop, even if the wait timed out.
             release.TrySetResult(true);
+            await run;
         }
 
         Assert.True(await run);
