@@ -44,6 +44,14 @@ public sealed class EventActionConfigStoreTests : IDisposable
     }
 
     [Fact]
+    public void Constructor_ConfigFileNameClimbingOutOfTheDataFolder_Throws()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => new NamedConfigStore(Path.Combine("..", "config.json")));
+
+        Assert.Equal("configFileName", ex.ParamName);
+    }
+
+    [Fact]
     public void Constructor_RelativeConfigFileName_ResolvesInsideTheDataFolder()
     {
         var namedStore = new NamedConfigStore(Path.Combine("sub", "config.json"));

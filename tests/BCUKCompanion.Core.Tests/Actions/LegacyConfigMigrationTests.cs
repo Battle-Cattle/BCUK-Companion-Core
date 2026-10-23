@@ -21,10 +21,19 @@ internal sealed record MigratingConfig
 }
 
 // Merges two legacy files the way a companion app would, recording what each Read reported.
-internal sealed class MigratingConfigStore(string dataFolderName, EventActionTypeRegistry registry)
-    : EventActionConfigStore<MigratingConfig>(dataFolderName, "migrating-config.json", registry)
+internal sealed record UnsupportedLegacyFile
+{
+    public Type? Value { get; init; }
+}
+
+internal sealed class MigratingConfigStore(
+    string dataFolderName, EventActionTypeRegistry registry, string configFileName = "migrating-config.json")
+    : EventActionConfigStore<MigratingConfig>(dataFolderName, configFileName, registry)
 {
     public List<LegacyConfigReadStatus> Statuses { get; } = [];
+
+    // Runs one more Read in the middle of a migration, for tests of Read's own contract.
+    public Action<LegacyConfigMigration>? ExtraRead { get; set; }
 
     protected override MigratingConfig CreateWhenMissing()
     {
@@ -35,6 +44,8 @@ internal sealed class MigratingConfigStore(string dataFolderName, EventActionTyp
         Statuses.Add(migration.Read<LegacyMappingsFile>(
             "legacy-mappings.json", legacy => legacy.Mappings is not null, legacy => mappings.AddRange(legacy.Mappings)));
         Statuses.Add(migration.Read<LegacyNamesFile>("legacy-names.json", null, legacy => names.AddRange(legacy.Names)));
+
+        ExtraRead?.Invoke(migration);
 
         if (!migration.FoundAny)
         {
@@ -190,6 +201,49 @@ public sealed class LegacyConfigMigrationTests : IDisposable
 
         Assert.Equal(["desk lamp"], config.Names);
         Assert.Equal([LegacyConfigReadStatus.Failed, LegacyConfigReadStatus.Read], store.Statuses);
+        Assert.False(File.Exists(store.ConfigFilePath));
+    }
+
+    [Fact]
+    public void Load_ConfigInASubfolder_StillReadsLegacyFilesFromTheDataFolder()
+    {
+        var nested = new MigratingConfigStore(dataFolderName, new EventActionTypeRegistry(), Path.Combine("v2", "config.json"));
+        WriteLegacy("legacy-names.json", """{ "Names": [ "desk lamp" ] }""");
+
+        var config = nested.Load();
+
+        Assert.Equal(["desk lamp"], config.Names);
+        Assert.Equal(Path.Combine(directory, "v2", "config.json"), nested.ConfigFilePath);
+        Assert.True(File.Exists(nested.ConfigFilePath));
+    }
+
+    [Theory]
+    [InlineData("..")]
+    [InlineData("rooted")]
+    public void Read_FileNameOutsideTheDataFolder_Throws(string kind)
+    {
+        var fileName = kind == "rooted"
+            ? Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "legacy.json")
+            : Path.Combine("..", "legacy.json");
+        ArgumentException? thrown = null;
+        store.ExtraRead = migration =>
+            thrown = Assert.Throws<ArgumentException>(() => migration.Read<LegacyNamesFile>(fileName, null, _ => { }));
+
+        store.Load();
+
+        Assert.Equal("fileName", thrown?.ParamName);
+    }
+
+    [Fact]
+    public void Load_LegacyShapeTheSerializerCannotRead_CountsAsFailed()
+    {
+        WriteLegacy("unsupported.json", """{ "Value": "System.String" }""");
+        var status = LegacyConfigReadStatus.Missing;
+        store.ExtraRead = migration => status = migration.Read<UnsupportedLegacyFile>("unsupported.json", null, _ => { });
+
+        store.Load();
+
+        Assert.Equal(LegacyConfigReadStatus.Failed, status);
         Assert.False(File.Exists(store.ConfigFilePath));
     }
 }

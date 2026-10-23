@@ -48,14 +48,15 @@ public sealed class LegacyConfigMigration
     /// case, overriding the initializer.
     /// </remarks>
     /// <typeparam name="TLegacy">The legacy file's shape.</typeparam>
-    /// <param name="fileName">The legacy file's name in the store's data folder.</param>
+    /// <param name="fileName">The legacy file's name, relative to the store's data folder.</param>
     /// <param name="isValid">Checks the parsed file is usable, e.g. that its collections aren't null; <see langword="null"/> accepts any non-null result.</param>
     /// <param name="onRead">Takes the parsed file's contents; runs only when the status is <see cref="LegacyConfigReadStatus.Read"/>.</param>
     /// <returns>Whether the file was missing, read, or failed.</returns>
+    /// <exception cref="ArgumentException"><paramref name="fileName"/> is rooted or resolves outside the data folder.</exception>
     public LegacyConfigReadStatus Read<TLegacy>(string fileName, Func<TLegacy, bool>? isValid, Action<TLegacy> onRead)
         where TLegacy : class
     {
-        var path = Path.Combine(directory, fileName);
+        var path = DataFolderPath.Resolve(directory, fileName, nameof(fileName));
         var json = TryReadText(path, out var missing);
         if (missing)
         {
@@ -118,11 +119,14 @@ public sealed class LegacyConfigMigration
         }
     }
 
-    /// <summary>Parses a legacy file's text, logging rather than throwing when it isn't valid JSON.</summary>
+    /// <summary>
+    /// Parses a legacy file's text, logging rather than throwing when it isn't valid JSON or
+    /// <typeparamref name="TLegacy"/> has a member System.Text.Json can't deserialize.
+    /// </summary>
     /// <typeparam name="TLegacy">The legacy file's shape.</typeparam>
     /// <param name="json">The legacy file's text.</param>
     /// <param name="path">The legacy file's full path, for the log message.</param>
-    /// <returns>The parsed file; <see langword="null"/> when it isn't valid JSON or holds JSON <c>null</c>.</returns>
+    /// <returns>The parsed file; <see langword="null"/> when it couldn't be parsed or holds JSON <c>null</c>.</returns>
     private TLegacy? TryDeserialize<TLegacy>(string json, string path)
         where TLegacy : class
     {
@@ -136,7 +140,7 @@ public sealed class LegacyConfigMigration
 
             return legacy;
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
             Debug.WriteLine($"Failed to migrate legacy config '{path}': {ex}");
             return null;
