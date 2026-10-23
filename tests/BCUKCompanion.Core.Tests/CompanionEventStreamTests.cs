@@ -436,6 +436,54 @@ public class CompanionEventStreamTests
         Assert.False(commandRaised);
     }
 
+    [Fact]
+    public async Task DropsMalformedActivityAndRedemptionFramesButProcessesLaterOnes()
+    {
+        const string sse = """
+            data: {"type":"follow", not json
+
+            data: {"type":"channel_points_redemption", not json
+
+            data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"t","userLogin":"u","userName":"U","redeemedAt":"2026-01-01T00:00:00Z"}
+
+            """;
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var activityRaised = false;
+        stream.ActivityReceived += (_, _) => activityRaised = true;
+        var redemptions = new List<RedemptionEvent>();
+        stream.RedemptionReceived += (_, e) => redemptions.Add(e);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => redemptions.Count >= 1, TestTimeout);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        Assert.False(activityRaised);
+        Assert.Equal("r1", Assert.Single(redemptions).RewardId);
+    }
+
+    [Fact]
+    public async Task MalformedCatchUpBodyDeliversNothingAndStillReadsLiveEvents()
+    {
+        const string sse = "data: {\"type\":\"follow\",\"id\":6,\"displayName\":\"Live\",\"detail\":null,\"occurredAt\":\"2026-01-01T00:02:00Z\"}\n\n";
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: "{not json");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var received = new List<CompanionActivityEvent>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
+        cts.Cancel();
+        await SwallowCancellationAsync(runTask);
+
+        Assert.Equal("Live", Assert.Single(received).DisplayName);
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
     {
         using var cts = new CancellationTokenSource(timeout);

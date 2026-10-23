@@ -83,6 +83,21 @@ public class AdvancedCommandClientTests
 
     [Theory]
     [MemberData(nameof(AckCalls))]
+    public async Task Ack_SendsTheExactJsonTheBotReads(string call, string path)
+    {
+        _ = path;
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """{"ok":true,"resolved":true}""");
+        using CompanionClient client = CreateClient(handler);
+
+        await SendAck(client, call, "e1", ok: false, error: "Lamp offline");
+        Assert.Equal("""{"eventId":"e1","ok":false,"error":"Lamp offline"}""", handler.LastRequestBody);
+
+        await SendAck(client, call, "e2", ok: true);
+        Assert.Equal("""{"eventId":"e2","ok":true,"error":null}""", handler.LastRequestBody);
+    }
+
+    [Theory]
+    [MemberData(nameof(AckCalls))]
     public async Task Ack_ReportsAnAlreadyResolvedEvent(string call, string path)
     {
         _ = path;
@@ -118,6 +133,19 @@ public class AdvancedCommandClientTests
         nameof(CompanionClient.ReportCommandProgressAsync) => client.ReportCommandProgressAsync(eventId),
         _ => client.ReportRedemptionProgressAsync(eventId),
     };
+
+    [Theory]
+    [MemberData(nameof(ProgressCalls))]
+    public async Task Progress_SendsTheExactJsonTheBotReads(string call, string path)
+    {
+        _ = path;
+        var handler = new FakeHttpMessageHandler(HttpStatusCode.OK, """{"ok":true,"extended":true}""");
+        using CompanionClient client = CreateClient(handler);
+
+        await SendProgress(client, call, "e1");
+
+        Assert.Equal("""{"eventId":"e1"}""", handler.LastRequestBody);
+    }
 
     [Theory]
     [MemberData(nameof(ProgressCalls))]

@@ -163,9 +163,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
     public async Task<bool> AckAdvancedCommandAsync(string eventId, bool ok, string? error = null, CancellationToken cancellationToken = default)
     {
-        var body = JsonSerializer.Serialize(new { eventId, ok, error });
-        AckResponse parsed = await SendAsync<AckResponse>(
-            HttpMethod.Post, "/api/companion/commands/ack", body, "Acknowledging command", cancellationToken).ConfigureAwait(false);
+        AckResponse parsed = await PostJsonAsync<AckResponse>(
+            "/api/companion/commands/ack", new { eventId, ok, error }, "Acknowledging command", cancellationToken).ConfigureAwait(false);
         return parsed.Resolved;
     }
 
@@ -185,9 +184,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
     public async Task<bool> AckRedemptionAsync(string redemptionId, bool ok, string? error = null, CancellationToken cancellationToken = default)
     {
-        var body = JsonSerializer.Serialize(new { eventId = redemptionId, ok, error });
-        AckResponse parsed = await SendAsync<AckResponse>(
-            HttpMethod.Post, "/api/companion/rewards/ack", body, "Acknowledging redemption", cancellationToken).ConfigureAwait(false);
+        AckResponse parsed = await PostJsonAsync<AckResponse>(
+            "/api/companion/rewards/ack", new { eventId = redemptionId, ok, error }, "Acknowledging redemption", cancellationToken).ConfigureAwait(false);
         return parsed.Resolved;
     }
 
@@ -228,9 +226,8 @@ public sealed class CompanionClient : IDisposable
     /// <returns>A task whose result is true if the bot restarted its acknowledgement timeout; false if it's no longer waiting for the event.</returns>
     private async Task<bool> ReportProgressAsync(string path, string eventId, string operationDescription, CancellationToken cancellationToken)
     {
-        var body = JsonSerializer.Serialize(new { eventId });
-        ProgressResponse parsed = await SendAsync<ProgressResponse>(
-            HttpMethod.Post, path, body, operationDescription, cancellationToken).ConfigureAwait(false);
+        ProgressResponse parsed = await PostJsonAsync<ProgressResponse>(
+            path, new { eventId }, operationDescription, cancellationToken).ConfigureAwait(false);
         return parsed.Extended;
     }
 
@@ -252,6 +249,20 @@ public sealed class CompanionClient : IDisposable
     private Task<TResponse> FetchAsync<TResponse>(string path, string operationDescription, CancellationToken cancellationToken)
         where TResponse : class, IApiEnvelope
         => SendAsync<TResponse>(HttpMethod.Get, path, null, operationDescription, cancellationToken);
+
+    /// <summary>
+    /// Serializes <paramref name="body"/> to JSON and POSTs it to a companion API path, checking
+    /// the response envelope like <see cref="FetchAsync{TResponse}"/>.
+    /// </summary>
+    /// <typeparam name="TResponse">The response body's shape.</typeparam>
+    /// <param name="path">The companion API path, relative to the bot host.</param>
+    /// <param name="body">The request body; its property names become the JSON field names the bot reads.</param>
+    /// <param name="operationDescription">Names the request in error messages, e.g. "Acknowledging command".</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
+    private Task<TResponse> PostJsonAsync<TResponse>(string path, object body, string operationDescription, CancellationToken cancellationToken)
+        where TResponse : class, IApiEnvelope
+        => SendAsync<TResponse>(HttpMethod.Post, path, JsonSerializer.Serialize(body), operationDescription, cancellationToken);
 
     /// <summary>
     /// Sends an authenticated request (with an optional JSON body) to a companion API path and
