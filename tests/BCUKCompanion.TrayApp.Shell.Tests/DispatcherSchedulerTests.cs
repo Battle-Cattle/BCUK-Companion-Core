@@ -48,16 +48,19 @@ public sealed class DispatcherSchedulerTests
     private static async Task CompletesOnlyWhenTheWorkCompletesCore()
     {
         using var ui = new DispatcherThread();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource();
         bool finished = false;
 
         Task scheduled = DispatcherScheduler.For(ui.Dispatcher)(async () =>
         {
+            started.SetResult();
             await release.Task;
             finished = true;
         });
 
-        await Task.Delay(50);
+        // The work is now parked on release, so the scheduled task must still be running.
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.False(scheduled.IsCompleted);
 
         release.SetResult();
