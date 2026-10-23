@@ -51,23 +51,11 @@ public class CompanionEventStreamTests
     [Fact]
     public async Task IgnoresUnknownEventTypeButStillProcessesLaterEvents()
     {
-        const string sse = """
+        (bool otherRaised, RedemptionEvent? redemption) = await RunFramesThenARedemptionAsync("""
             data: {"type":"future_event","foo":"bar"}
+            """);
 
-            data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"t","userLogin":"u","userName":"U","redeemedAt":"2026-01-01T00:00:00Z"}
-
-            """;
-        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
-        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
-
-        var activityRaised = false;
-        stream.ActivityReceived += (_, _) => activityRaised = true;
-        RedemptionEvent? redemption = null;
-        stream.RedemptionReceived += (_, e) => redemption = e;
-
-        await RunUntilDisconnectedAsync(stream);
-
-        Assert.False(activityRaised);
+        Assert.False(otherRaised);
         Assert.NotNull(redemption);
     }
 
@@ -358,7 +346,7 @@ public class CompanionEventStreamTests
     [Fact]
     public async Task IgnoresIncompleteAdvancedCommandPayloads()
     {
-        const string sse = """
+        (bool otherRaised, RedemptionEvent? redemption) = await RunFramesThenARedemptionAsync("""
             data: {"type":"advanced_command","id":"","commandName":"Hydrate","source":"chat","triggeredAt":"2026-01-01T00:00:00Z"}
 
             data: {"type":"advanced_command","id":"e1","commandName":"Hydrate","source":"somewhere","triggeredAt":"2026-01-01T00:00:00Z"}
@@ -366,21 +354,9 @@ public class CompanionEventStreamTests
             data: {"type":"advanced_command","id":"e2","commandName":"","source":"chat","triggeredAt":"2026-01-01T00:00:00Z"}
 
             data: {"type":"advanced_command", not json
+            """);
 
-            data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"t","userLogin":"u","userName":"U","redeemedAt":"2026-01-01T00:00:00Z"}
-
-            """;
-        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
-        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
-
-        var commandRaised = false;
-        stream.AdvancedCommandReceived += (_, _) => commandRaised = true;
-        RedemptionEvent? redemption = null;
-        stream.RedemptionReceived += (_, e) => redemption = e;
-
-        await RunUntilDisconnectedAsync(stream);
-
-        Assert.False(commandRaised);
+        Assert.False(otherRaised);
         Assert.NotNull(redemption);
     }
 
@@ -417,6 +393,31 @@ public class CompanionEventStreamTests
         }
 
         Assert.True(ended.Task.IsCompleted, "RunAsync ended before the expected connections did.");
+    }
+
+    /// <summary>
+    /// Streams <paramref name="frames"/> followed by one valid redemption, and reports whether any
+    /// activity or advanced-command event was raised and whether the redemption still arrived.
+    /// </summary>
+    private static async Task<(bool OtherRaised, RedemptionEvent? Redemption)> RunFramesThenARedemptionAsync(string frames)
+    {
+        string sse = frames + """
+
+
+            data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"t","userLogin":"u","userName":"U","redeemedAt":"2026-01-01T00:00:00Z"}
+
+            """;
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var otherRaised = false;
+        stream.ActivityReceived += (_, _) => otherRaised = true;
+        stream.AdvancedCommandReceived += (_, _) => otherRaised = true;
+        RedemptionEvent? redemption = null;
+        stream.RedemptionReceived += (_, e) => redemption = e;
+
+        await RunUntilDisconnectedAsync(stream);
+        return (otherRaised, redemption);
     }
 
     private static async Task SwallowCancellationAsync(Task task)
