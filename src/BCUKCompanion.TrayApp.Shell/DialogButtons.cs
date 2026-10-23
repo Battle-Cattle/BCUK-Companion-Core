@@ -10,10 +10,10 @@ namespace BCUKCompanion.TrayApp;
 public static class DialogButtons
 {
     /// <summary>
-    /// Builds the row. OK runs <paramref name="onOk"/>, which validates and sets
-    /// <see cref="Window.DialogResult"/> itself. Cancel is <see cref="Button.IsCancel"/>, so
-    /// clicking it or pressing Esc closes the modal dialog with <c>DialogResult = false</c>
-    /// without a click handler.
+    /// Builds the row. OK is <see cref="Button.IsDefault"/>, so clicking it or pressing Enter runs
+    /// <paramref name="onOk"/>, which validates and sets <see cref="Window.DialogResult"/> itself.
+    /// Cancel is <see cref="Button.IsCancel"/>, so clicking it or pressing Esc closes the modal
+    /// dialog with <c>DialogResult = false</c> without a click handler.
     /// </summary>
     /// <param name="onOk">Runs when OK is clicked.</param>
     /// <param name="okText">The OK button's caption.</param>
@@ -22,7 +22,7 @@ public static class DialogButtons
     {
         ArgumentNullException.ThrowIfNull(onOk);
 
-        var okButton = new Button { Content = okText, Width = 80, Margin = new Thickness(0, 0, 8, 0) };
+        var okButton = new Button { Content = okText, Width = 80, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
         okButton.Click += (_, _) => onOk();
 
         var cancelButton = new Button { Content = "Cancel", Width = 80, IsCancel = true };
