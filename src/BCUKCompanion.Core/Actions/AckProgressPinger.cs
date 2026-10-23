@@ -23,10 +23,24 @@ public static class AckProgressPinger
     /// <param name="ping">Sends one progress ping and returns whether the bot extended its timeout; canceled once the work finishes.</param>
     /// <param name="interval">Time between pings; <see cref="DefaultInterval"/> when null.</param>
     /// <returns>Whatever <paramref name="work"/> returns.</returns>
-    public static async Task<T> RunWithProgressAsync<T>(Func<Task<T>> work, Func<CancellationToken, Task<bool>> ping, TimeSpan? interval = null)
+    public static Task<T> RunWithProgressAsync<T>(Func<Task<T>> work, Func<CancellationToken, Task<bool>> ping, TimeSpan? interval = null) =>
+        RunWithProgressAsync(work, ping, interval, TimeProvider.System);
+
+    /// <summary>
+    /// Runs <paramref name="work"/> like <see cref="RunWithProgressAsync{T}(Func{Task{T}}, Func{CancellationToken, Task{bool}}, TimeSpan?)"/>,
+    /// timing the pings with <paramref name="timeProvider"/> instead of the system clock (so a test can advance time
+    /// instead of waiting for it).
+    /// </summary>
+    /// <param name="work">The event's actions; its result is returned.</param>
+    /// <param name="ping">Sends one progress ping and returns whether the bot extended its timeout; canceled once the work finishes.</param>
+    /// <param name="interval">Time between pings; <see cref="DefaultInterval"/> when null.</param>
+    /// <param name="timeProvider">The clock the wait between pings is measured on.</param>
+    /// <returns>Whatever <paramref name="work"/> returns.</returns>
+    public static async Task<T> RunWithProgressAsync<T>(Func<Task<T>> work, Func<CancellationToken, Task<bool>> ping, TimeSpan? interval, TimeProvider timeProvider)
     {
+        ArgumentNullException.ThrowIfNull(timeProvider);
         using var done = new CancellationTokenSource();
-        Task pinging = PingUntilCanceledAsync(ping, interval ?? DefaultInterval, done.Token);
+        Task pinging = PingUntilCanceledAsync(ping, interval ?? DefaultInterval, timeProvider, done.Token);
         try
         {
             return await work().ConfigureAwait(false);
@@ -44,15 +58,16 @@ public static class AckProgressPinger
     /// </summary>
     /// <param name="ping">Sends one progress ping and returns whether the bot extended its timeout.</param>
     /// <param name="interval">Time to wait before each ping.</param>
+    /// <param name="timeProvider">The clock the wait before each ping is measured on.</param>
     /// <param name="cancellationToken">Canceled once the work finishes, which stops pinging.</param>
     /// <returns>A task that completes when pinging stops; it never faults.</returns>
-    private static async Task PingUntilCanceledAsync(Func<CancellationToken, Task<bool>> ping, TimeSpan interval, CancellationToken cancellationToken)
+    private static async Task PingUntilCanceledAsync(Func<CancellationToken, Task<bool>> ping, TimeSpan interval, TimeProvider timeProvider, CancellationToken cancellationToken)
     {
         while (true)
         {
             try
             {
-                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(interval, timeProvider, cancellationToken).ConfigureAwait(false);
                 if (!await ping(cancellationToken).ConfigureAwait(false))
                 {
                     return;

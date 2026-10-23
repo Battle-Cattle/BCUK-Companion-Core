@@ -22,11 +22,7 @@ public class CompanionEventStreamTests
         RedemptionEvent? received = null;
         stream.RedemptionReceived += (_, e) => received = e;
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received is not null, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         Assert.NotNull(received);
         Assert.Equal("Hydrate!", received!.RewardTitle);
@@ -45,11 +41,7 @@ public class CompanionEventStreamTests
         CompanionActivityEvent? received = null;
         stream.ActivityReceived += (_, e) => received = e;
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received is not null, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         Assert.NotNull(received);
         Assert.Equal("follow", received!.Type);
@@ -59,27 +51,11 @@ public class CompanionEventStreamTests
     [Fact]
     public async Task IgnoresUnknownEventTypeButStillProcessesLaterEvents()
     {
-        const string sse = """
+        (bool otherRaised, RedemptionEvent? redemption) = await RunFramesThenARedemptionAsync("""
             data: {"type":"future_event","foo":"bar"}
+            """);
 
-            data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"t","userLogin":"u","userName":"U","redeemedAt":"2026-01-01T00:00:00Z"}
-
-            """;
-        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
-        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
-
-        var activityRaised = false;
-        stream.ActivityReceived += (_, _) => activityRaised = true;
-        RedemptionEvent? redemption = null;
-        stream.RedemptionReceived += (_, e) => redemption = e;
-
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => redemption is not null, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
-
-        Assert.False(activityRaised);
+        Assert.False(otherRaised);
         Assert.NotNull(redemption);
     }
 
@@ -99,11 +75,7 @@ public class CompanionEventStreamTests
         var received = new List<CompanionActivityEvent>();
         stream.ActivityReceived += (_, e) => received.Add(e);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received.Count >= 2, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         Assert.Equal(2, received.Count);
         Assert.Equal("Alice", received[0].DisplayName);
@@ -135,12 +107,7 @@ public class CompanionEventStreamTests
         stream.ActivityReceived += (_, e) => received.Add(e);
         stream.LastActivityEventIdChanged += (_, id) => changes.Add(id);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
-        await Task.Delay(50);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         CompanionActivityEvent activity = Assert.Single(received);
         Assert.Equal("WhileClosed", activity.DisplayName);
@@ -173,12 +140,7 @@ public class CompanionEventStreamTests
         stream.ActivityReceived += (_, e) => received.Add(e);
         stream.LastActivityEventIdChanged += (_, id) => changes.Add(id);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
-        await Task.Delay(50);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         CompanionActivityEvent activity = Assert.Single(received);
         Assert.Equal("NewFollower", activity.DisplayName);
@@ -201,11 +163,7 @@ public class CompanionEventStreamTests
         stream.ActivityReceived += (_, _) => order.Add("activity");
         stream.LastActivityEventIdChanged += (_, _) => order.Add("mark");
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => order.Count >= 2, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         Assert.Equal(new[] { "activity", "mark" }, order);
     }
@@ -223,13 +181,7 @@ public class CompanionEventStreamTests
         var received = new List<CompanionActivityEvent>();
         stream.ActivityReceived += (_, e) => received.Add(e);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
-        // Give a would-be duplicate live dispatch a moment to have fired if it were going to.
-        await Task.Delay(50);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         CompanionActivityEvent activity = Assert.Single(received);
         Assert.Equal("Alice", activity.DisplayName);
@@ -246,13 +198,7 @@ public class CompanionEventStreamTests
         var activityRaised = false;
         stream.ActivityReceived += (_, _) => activityRaised = true;
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => handler.LastRecentRequestPath is not null, TestTimeout);
-        // Give the (deliberately absent) ActivityReceived dispatch a moment to have fired if it were going to.
-        await Task.Delay(50);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         Assert.False(activityRaised);
     }
@@ -274,11 +220,7 @@ public class CompanionEventStreamTests
         var received = new List<CompanionActivityEvent>();
         stream.ActivityReceived += (_, e) => received.Add(e);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received.Count >= 1, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         CompanionActivityEvent activity = Assert.Single(received);
         Assert.Equal("Bob", activity.DisplayName);
@@ -311,11 +253,7 @@ public class CompanionEventStreamTests
         var received = new List<CompanionActivityEvent>();
         stream.ActivityReceived += (_, e) => received.Add(e);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received.Count >= 2, TimeSpan.FromSeconds(10));
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream, connections: 2);
 
         Assert.Equal(2, received.Count);
         Assert.Equal("Alice", received[0].DisplayName);
@@ -336,22 +274,27 @@ public class CompanionEventStreamTests
             IdleTimeout = TimeSpan.FromMilliseconds(100),
         };
 
-        int disconnects = 0;
+        var disconnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         stream.ConnectionStateChanged += (_, state) =>
         {
             if (state == CompanionConnectionState.Disconnected)
             {
-                Interlocked.Increment(ref disconnects);
+                disconnected.TrySetResult();
             }
         };
 
         using var cts = new CancellationTokenSource();
         Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => Volatile.Read(ref disconnects) >= 1 || runTask.IsCompleted, TestTimeout);
-
-        Assert.False(runTask.IsCompleted, $"RunAsync ended early: {runTask.Exception?.GetBaseException()}");
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        try
+        {
+            await Task.WhenAny(disconnected.Task, runTask).WaitAsync(TestTimeout);
+            Assert.False(runTask.IsCompleted, $"RunAsync ended early: {runTask.Exception?.GetBaseException()}");
+        }
+        finally
+        {
+            cts.Cancel();
+            await SwallowCancellationAsync(runTask);
+        }
     }
 
     [Fact]
@@ -391,11 +334,7 @@ public class CompanionEventStreamTests
         var received = new List<AdvancedCommandEvent>();
         stream.AdvancedCommandReceived += (_, e) => received.Add(e);
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => received.Count >= 2, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        await RunUntilDisconnectedAsync(stream);
 
         Assert.Equal(["e1", "e2"], received.Select(e => e.Id));
         Assert.Equal("Hydrate", received[0].CommandName);
@@ -407,7 +346,7 @@ public class CompanionEventStreamTests
     [Fact]
     public async Task IgnoresIncompleteAdvancedCommandPayloads()
     {
-        const string sse = """
+        (bool otherRaised, RedemptionEvent? redemption) = await RunFramesThenARedemptionAsync("""
             data: {"type":"advanced_command","id":"","commandName":"Hydrate","source":"chat","triggeredAt":"2026-01-01T00:00:00Z"}
 
             data: {"type":"advanced_command","id":"e1","commandName":"Hydrate","source":"somewhere","triggeredAt":"2026-01-01T00:00:00Z"}
@@ -415,6 +354,55 @@ public class CompanionEventStreamTests
             data: {"type":"advanced_command","id":"e2","commandName":"","source":"chat","triggeredAt":"2026-01-01T00:00:00Z"}
 
             data: {"type":"advanced_command", not json
+            """);
+
+        Assert.False(otherRaised);
+        Assert.NotNull(redemption);
+    }
+
+    /// <summary>
+    /// Runs the stream until its <paramref name="connections"/>th connection has ended, then stops it.
+    /// The stream dispatches the catch-up and every SSE event before it reports the connection as
+    /// disconnected, and waits at least 0.8s before reconnecting, so by then every event from those
+    /// connections has been delivered and none from a later one has: an assertion that something
+    /// was not delivered needs no extra wait.
+    /// </summary>
+    private static async Task RunUntilDisconnectedAsync(CompanionEventStream stream, int connections = 1)
+    {
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int disconnects = 0;
+        stream.ConnectionStateChanged += (_, state) =>
+        {
+            if (state == CompanionConnectionState.Disconnected && Interlocked.Increment(ref disconnects) == connections)
+            {
+                ended.TrySetResult();
+            }
+        };
+
+        using var cts = new CancellationTokenSource();
+        Task runTask = stream.RunAsync("token", cts.Token);
+        try
+        {
+            await Task.WhenAny(ended.Task, runTask).WaitAsync(TestTimeout);
+        }
+        finally
+        {
+            // Stop the stream even if the wait timed out, so it can't keep reconnecting.
+            cts.Cancel();
+            await SwallowCancellationAsync(runTask);
+        }
+
+        Assert.True(ended.Task.IsCompleted, "RunAsync ended before the expected connections did.");
+    }
+
+    /// <summary>
+    /// Streams <paramref name="frames"/> followed by one valid redemption, and reports whether any
+    /// activity or advanced-command event was raised and whether the redemption still arrived.
+    /// </summary>
+    private static async Task<(bool OtherRaised, RedemptionEvent? Redemption)> RunFramesThenARedemptionAsync(string frames)
+    {
+        string sse = frames + """
+
 
             data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"t","userLogin":"u","userName":"U","redeemedAt":"2026-01-01T00:00:00Z"}
 
@@ -422,32 +410,14 @@ public class CompanionEventStreamTests
         var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
         var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
 
-        var commandRaised = false;
-        stream.AdvancedCommandReceived += (_, _) => commandRaised = true;
+        var otherRaised = false;
+        stream.ActivityReceived += (_, _) => otherRaised = true;
+        stream.AdvancedCommandReceived += (_, _) => otherRaised = true;
         RedemptionEvent? redemption = null;
         stream.RedemptionReceived += (_, e) => redemption = e;
 
-        using var cts = new CancellationTokenSource();
-        Task runTask = stream.RunAsync("token", cts.Token);
-        await WaitUntilAsync(() => redemption is not null, TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
-
-        Assert.False(commandRaised);
-    }
-
-    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        while (!condition())
-        {
-            if (cts.IsCancellationRequested)
-            {
-                throw new TimeoutException("Condition was not met within the timeout.");
-            }
-
-            await Task.Delay(10).ConfigureAwait(false);
-        }
+        await RunUntilDisconnectedAsync(stream);
+        return (otherRaised, redemption);
     }
 
     private static async Task SwallowCancellationAsync(Task task)
