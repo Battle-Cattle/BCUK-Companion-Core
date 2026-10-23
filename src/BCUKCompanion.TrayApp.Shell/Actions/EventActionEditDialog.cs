@@ -39,12 +39,6 @@ public sealed class EventActionEditDialog : Window
         categoryCombo.ItemsSource = editors;
         categoryCombo.SelectionChanged += (_, _) => RefreshVisibility();
 
-        var okButton = new Button { Content = "OK", Width = 80, Margin = new Thickness(0, 0, 8, 0) };
-        okButton.Click += (_, _) => OnOk();
-
-        var cancelButton = new Button { Content = "Cancel", Width = 80, IsCancel = true };
-        cancelButton.Click += (_, _) => DialogResult = false;
-
         var panel = new StackPanel { Margin = new Thickness(12) };
         panel.Children.Add(new TextBlock { Text = "Category" });
         panel.Children.Add(categoryCombo);
@@ -53,13 +47,7 @@ public sealed class EventActionEditDialog : Window
             panel.Children.Add(editor.View);
         }
         panel.Children.Add(errorText);
-        panel.Children.Add(new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Margin = new Thickness(0, 12, 0, 0),
-            Children = { okButton, cancelButton },
-        });
+        panel.Children.Add(DialogButtons.Create(OnOk));
         Content = panel;
 
         var existingEditor = existing is null ? null : editors.FirstOrDefault(e => e.CanEdit(existing));
