@@ -3,7 +3,7 @@ using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
 using Xunit;
 
-namespace BCUKCompanion.Core.Tests;
+namespace BCUKCompanion.Core.Tests.Events;
 
 public class CompanionEventStreamTests
 {
@@ -51,12 +51,12 @@ public class CompanionEventStreamTests
     [Fact]
     public async Task IgnoresUnknownEventTypeButStillProcessesLaterEvents()
     {
-        (bool otherRaised, RedemptionEvent? redemption) = await RunFramesThenARedemptionAsync("""
+        (bool otherRaised, List<RedemptionEvent> redemptions) = await RunFramesThenARedemptionAsync("""
             data: {"type":"future_event","foo":"bar"}
             """);
 
         Assert.False(otherRaised);
-        Assert.NotNull(redemption);
+        Assert.Equal("r1", Assert.Single(redemptions).RewardId);
     }
 
     /// <summary>With no mark set, the connect-time catch-up delivers every recent activity in id order.</summary>
@@ -346,7 +346,7 @@ public class CompanionEventStreamTests
     [Fact]
     public async Task IgnoresIncompleteAdvancedCommandPayloads()
     {
-        (bool otherRaised, RedemptionEvent? redemption) = await RunFramesThenARedemptionAsync("""
+        (bool otherRaised, List<RedemptionEvent> redemptions) = await RunFramesThenARedemptionAsync("""
             data: {"type":"advanced_command","id":"","commandName":"Hydrate","source":"chat","triggeredAt":"2026-01-01T00:00:00Z"}
 
             data: {"type":"advanced_command","id":"e1","commandName":"Hydrate","source":"somewhere","triggeredAt":"2026-01-01T00:00:00Z"}
@@ -357,7 +357,35 @@ public class CompanionEventStreamTests
             """);
 
         Assert.False(otherRaised);
-        Assert.NotNull(redemption);
+        Assert.Equal("r1", Assert.Single(redemptions).RewardId);
+    }
+
+    [Fact]
+    public async Task DropsMalformedActivityAndRedemptionFramesButProcessesLaterOnes()
+    {
+        (bool otherRaised, List<RedemptionEvent> redemptions) = await RunFramesThenARedemptionAsync("""
+            data: {"type":"follow", not json
+
+            data: {"type":"channel_points_redemption", not json
+            """);
+
+        Assert.False(otherRaised);
+        Assert.Equal("r1", Assert.Single(redemptions).RewardId);
+    }
+
+    [Fact]
+    public async Task MalformedCatchUpBodyDeliversNothingAndStillReadsLiveEvents()
+    {
+        const string sse = "data: {\"type\":\"follow\",\"id\":6,\"displayName\":\"Live\",\"detail\":null,\"occurredAt\":\"2026-01-01T00:02:00Z\"}\n\n";
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: "{not json");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var received = new List<CompanionActivityEvent>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+
+        await RunUntilDisconnectedAsync(stream);
+
+        Assert.Equal("Live", Assert.Single(received).DisplayName);
     }
 
     /// <summary>
@@ -396,10 +424,10 @@ public class CompanionEventStreamTests
     }
 
     /// <summary>
-    /// Streams <paramref name="frames"/> followed by one valid redemption, and reports whether any
-    /// activity or advanced-command event was raised and whether the redemption still arrived.
+    /// Streams <paramref name="frames"/> followed by one valid redemption (reward <c>r1</c>), and reports
+    /// whether any activity or advanced-command event was raised and which redemptions arrived.
     /// </summary>
-    private static async Task<(bool OtherRaised, RedemptionEvent? Redemption)> RunFramesThenARedemptionAsync(string frames)
+    private static async Task<(bool OtherRaised, List<RedemptionEvent> Redemptions)> RunFramesThenARedemptionAsync(string frames)
     {
         string sse = frames + """
 
@@ -413,11 +441,11 @@ public class CompanionEventStreamTests
         var otherRaised = false;
         stream.ActivityReceived += (_, _) => otherRaised = true;
         stream.AdvancedCommandReceived += (_, _) => otherRaised = true;
-        RedemptionEvent? redemption = null;
-        stream.RedemptionReceived += (_, e) => redemption = e;
+        var redemptions = new List<RedemptionEvent>();
+        stream.RedemptionReceived += (_, e) => redemptions.Add(e);
 
         await RunUntilDisconnectedAsync(stream);
-        return (otherRaised, redemption);
+        return (otherRaised, redemptions);
     }
 
     private static async Task SwallowCancellationAsync(Task task)

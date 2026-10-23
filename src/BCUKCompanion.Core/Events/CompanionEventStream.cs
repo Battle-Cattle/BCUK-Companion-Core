@@ -258,7 +258,7 @@ public sealed class CompanionEventStream
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        RecentActivityResponse? parsed;
+        string body;
         try
         {
             using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
@@ -267,15 +267,14 @@ public sealed class CompanionEventStream
                 return;
             }
 
-            string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            parsed = JsonSerializer.Deserialize<RecentActivityResponse>(body);
+            body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
             return;
         }
 
-        if (parsed is not { Ok: true, Events: not null })
+        if (!EventJson.TryDeserialize(body, out RecentActivityResponse? parsed) || parsed is not { Ok: true, Events: not null })
         {
             return;
         }
@@ -342,17 +341,7 @@ public sealed class CompanionEventStream
     /// <param name="data">The frame's JSON data.</param>
     private void HandleActivityEvent(string data)
     {
-        CompanionActivityEvent? activity;
-        try
-        {
-            activity = JsonSerializer.Deserialize<CompanionActivityEvent>(data);
-        }
-        catch (JsonException)
-        {
-            return;
-        }
-
-        if (!IsValidActivity(activity))
+        if (!EventJson.TryDeserialize(data, out CompanionActivityEvent? activity) || !IsValidActivity(activity))
         {
             return;
         }
@@ -361,9 +350,9 @@ public sealed class CompanionEventStream
         // the backfill request races the SSE connection, so the server can buffer this
         // same event on the wire before the backfill response comes back. Only raise it
         // if MarkSeen says it's genuinely new.
-        if (MarkSeen(activity!))
+        if (MarkSeen(activity))
         {
-            DispatchActivity(activity!);
+            DispatchActivity(activity);
         }
     }
 
@@ -425,17 +414,7 @@ public sealed class CompanionEventStream
     /// <param name="data">The frame's JSON data.</param>
     private void HandleRedemptionEvent(string data)
     {
-        RedemptionEvent? redemption;
-        try
-        {
-            redemption = JsonSerializer.Deserialize<RedemptionEvent>(data);
-        }
-        catch (JsonException)
-        {
-            return;
-        }
-
-        if (redemption is not null && IsComplete(redemption))
+        if (EventJson.TryDeserialize(data, out RedemptionEvent? redemption) && IsComplete(redemption))
         {
             RedemptionReceived?.Invoke(this, redemption);
         }
@@ -445,17 +424,7 @@ public sealed class CompanionEventStream
     /// <param name="data">The frame's JSON data.</param>
     private void HandleAdvancedCommandEvent(string data)
     {
-        AdvancedCommandEvent? command;
-        try
-        {
-            command = JsonSerializer.Deserialize<AdvancedCommandEvent>(data);
-        }
-        catch (JsonException)
-        {
-            return;
-        }
-
-        if (command is not null && IsComplete(command) && MarkCommandSeen(command.Id))
+        if (EventJson.TryDeserialize(data, out AdvancedCommandEvent? command) && IsComplete(command) && MarkCommandSeen(command.Id))
         {
             AdvancedCommandReceived?.Invoke(this, command);
         }
