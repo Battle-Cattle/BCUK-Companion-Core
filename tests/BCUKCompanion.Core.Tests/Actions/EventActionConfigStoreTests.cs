@@ -11,6 +11,9 @@ internal sealed record TestConfig
 internal sealed class TestConfigStore(string dataFolderName, EventActionTypeRegistry registry)
     : EventActionConfigStore<TestConfig>(dataFolderName, "test-config.json", registry);
 
+internal sealed class NamedConfigStore(string configFileName)
+    : EventActionConfigStore<TestConfig>("BCUKCompanion.Core.Tests.Unused", configFileName, new EventActionTypeRegistry());
+
 public sealed class EventActionConfigStoreTests : IDisposable
 {
     private readonly string dataFolderName = $"BCUKCompanion.Core.Tests.{Guid.NewGuid():N}";
@@ -28,6 +31,32 @@ public sealed class EventActionConfigStoreTests : IDisposable
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void Constructor_RootedConfigFileName_Throws()
+    {
+        var rooted = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "config.json");
+
+        var ex = Assert.Throws<ArgumentException>(() => new NamedConfigStore(rooted));
+
+        Assert.Equal("configFileName", ex.ParamName);
+    }
+
+    [Fact]
+    public void Constructor_ConfigFileNameClimbingOutOfTheDataFolder_Throws()
+    {
+        var ex = Assert.Throws<ArgumentException>(() => new NamedConfigStore(Path.Combine("..", "config.json")));
+
+        Assert.Equal("configFileName", ex.ParamName);
+    }
+
+    [Fact]
+    public void Constructor_RelativeConfigFileName_ResolvesInsideTheDataFolder()
+    {
+        var namedStore = new NamedConfigStore(Path.Combine("sub", "config.json"));
+
+        Assert.EndsWith(Path.Combine("BCUKCompanion.Core.Tests.Unused", "sub", "config.json"), namedStore.ConfigFilePath);
     }
 
     [Fact]

@@ -14,6 +14,9 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
 {
     private readonly JsonSerializerOptions serializerOptions;
 
+    // The app's data folder, which holds the config file (possibly in a subfolder) and any legacy files.
+    private readonly string dataFolderPath;
+
     // Load() (background dispatch thread) and Save() (UI thread) can be called concurrently;
     // this keeps the read and the temp-file-write-then-move fully serialized within this
     // process so neither observes the other's half-finished file state.
@@ -21,12 +24,13 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
 
     /// <summary>Creates a store for <c>%APPDATA%\<paramref name="dataFolderName"/>\<paramref name="configFileName"/></c>.</summary>
     /// <param name="dataFolderName">The app's own data folder name (see <c>CompanionTrayAppOptions.DataFolderName</c>).</param>
-    /// <param name="configFileName">The config file's name.</param>
+    /// <param name="configFileName">The config file's name, relative to the data folder.</param>
     /// <param name="registry">The action kinds the file's mappings can contain.</param>
+    /// <exception cref="ArgumentException"><paramref name="configFileName"/> is rooted or resolves outside the data folder.</exception>
     protected EventActionConfigStore(string dataFolderName, string configFileName, EventActionTypeRegistry registry)
     {
-        ConfigFilePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), dataFolderName, configFileName);
+        dataFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), dataFolderName);
+        ConfigFilePath = DataFolderPath.Resolve(dataFolderPath, configFileName, nameof(configFileName));
         serializerOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
@@ -59,6 +63,13 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// persist the result so the migration runs at most once. Runs under the store's lock, which
     /// <see cref="Save"/> may re-enter from here.
     /// </summary>
+    /// <remarks>
+    /// To merge older config files, start a <see cref="BeginLegacyMigration"/>, read each file
+    /// with <see cref="LegacyConfigMigration.Read"/>, return a new <typeparamref name="TConfig"/>
+    /// when <see cref="LegacyConfigMigration.FoundAny"/> is false, and otherwise build the merged
+    /// config and <see cref="Save"/> it only if <see cref="LegacyConfigMigration.Succeeded"/>.
+    /// <see cref="OnLoaded"/> still runs on whatever this returns.
+    /// </remarks>
     /// <returns>The config to use in place of the missing file.</returns>
     protected virtual TConfig CreateWhenMissing() => new();
 
@@ -69,6 +80,20 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// <param name="config">The config just read from the file or supplied by <see cref="CreateWhenMissing"/>.</param>
     /// <returns>The config <see cref="Load"/> should return.</returns>
     protected virtual TConfig OnLoaded(TConfig config) => config;
+
+    /// <summary>
+    /// Starts reading an older install's config files from this store's data folder (even when the
+    /// config file itself is in a subfolder of it), with this
+    /// store's serializer options. Meant for <see cref="CreateWhenMissing"/>; see its remarks.
+    /// </summary>
+    /// <returns>A migration that reads legacy files and tracks whether it's safe to save the result.</returns>
+    protected LegacyConfigMigration BeginLegacyMigration() =>
+        new(dataFolderPath, serializerOptions);
+
+    /// <summary>The folder holding the config file: the data folder, or a subfolder of it.</summary>
+    private string ConfigFolderPath =>
+        // The constructor resolves ConfigFilePath inside the data folder, so it always has a parent folder.
+        Path.GetDirectoryName(ConfigFilePath)!;
 
     /// <summary>Reads and parses the existing file. A file that isn't valid JSON is backed up and replaced by a new <typeparamref name="TConfig"/>; I/O and permission errors propagate.</summary>
     /// <returns>The parsed config; a new <typeparamref name="TConfig"/> when the file is corrupt or holds JSON <c>null</c>.</returns>
@@ -98,8 +123,7 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     {
         lock (syncRoot)
         {
-            var directory = Path.GetDirectoryName(ConfigFilePath)!;
-            Directory.CreateDirectory(directory);
+            Directory.CreateDirectory(ConfigFolderPath);
 
             var tempPath = ConfigFilePath + ".tmp";
             File.WriteAllText(tempPath, JsonSerializer.Serialize(config, serializerOptions));
