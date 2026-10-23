@@ -37,6 +37,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
 {
     private readonly EventActionConfigStore<TConfig> configStore;
     private readonly EventActionDispatcher dispatcher;
+    private readonly EventActionMappingsEditor editor;
 
     /// <summary>
     /// Optional accessor for the shared <see cref="CompanionClient"/>, used to refresh the
@@ -48,7 +49,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// </summary>
     private readonly Func<CompanionClient?>? getCompanionClient;
 
-    /// <summary>The mappings being edited; saved by <see cref="BuildConfig"/> when the user clicks Save.</summary>
+    /// <summary>The mappings being edited (the <see cref="EventActionMappingsEditor"/>'s list); saved by <see cref="BuildConfig"/> when the user clicks Save.</summary>
     protected readonly ObservableCollection<EventActionMapping> Mappings;
 
     /// <summary>Lists <see cref="Mappings"/>; the selected one's actions show in <see cref="ActionsList"/>.</summary>
@@ -100,7 +101,8 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         this.configStore = configStore;
         this.getCompanionClient = getCompanionClient;
         InitialConfig = config;
-        Mappings = new ObservableCollection<EventActionMapping>(config.Mappings);
+        editor = new EventActionMappingsEditor(config.Mappings);
+        Mappings = editor.Mappings;
         dispatcher = new EventActionDispatcher(() => BuildConfig().Mappings, BuildContext);
 
         SaveButton.Click += async (_, _) => await OnSaveAsync().ConfigureAwait(true);
@@ -244,7 +246,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         // suggestions with its now-stale server result.
         int sequence = ++_rewardTitleRefreshSequence;
         var kind = SelectedKind;
-        RewardTitleCombo.ItemsSource = MappedNames(kind).ToList();
+        RewardTitleCombo.ItemsSource = editor.MappedNames(kind).ToList();
 
         // Best-effort enhancement: if we have a logged-in companion client, replace the
         // local-only suggestion list above with the live reward (or command) catalog once it arrives.
@@ -253,12 +255,6 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             _ = RefreshRewardTitleSuggestionsFromServerAsync(client, kind, sequence);
         }
     }
-
-    /// <summary>The names already used by mappings of <paramref name="kind"/>.</summary>
-    /// <param name="kind">Whether to list reward titles or command names.</param>
-    /// <returns>The distinct names (case-insensitively) of the current mappings of that kind.</returns>
-    private IEnumerable<string> MappedNames(EventActionTriggerKind kind) =>
-        Mappings.Where(m => m.TriggerKind == kind).Select(m => m.RewardTitle).Distinct(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Fetches the live names for <paramref name="kind"/>: enabled reward titles, or the
@@ -309,11 +305,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             return;
         }
 
-        var titles = names
-            .Concat(MappedNames(kind))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var titles = editor.MergeSuggestions(names, kind);
 
         // Preserve whatever the user has already typed: RewardTitleCombo is editable, and WPF
         // can clear its Text when a fresh ItemsSource assignment invalidates the current
@@ -343,26 +335,18 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// <summary>Adds a mapping for the typed name and trigger kind, or selects the existing one for it.</summary>
     private void OnAddMapping()
     {
-        var title = RewardTitleCombo.Text.Trim();
-        if (string.IsNullOrEmpty(title))
+        var countBefore = Mappings.Count;
+        if (editor.FindOrAdd(RewardTitleCombo.Text, SelectedKind) is not { } mapping)
         {
             StatusText.Text = "Enter a reward title or command name first.";
             return;
         }
 
-        var kind = SelectedKind;
-        var existing = Mappings.FirstOrDefault(m =>
-            m.TriggerKind == kind && string.Equals(m.RewardTitle, title, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null)
-        {
-            MappingsList.SelectedItem = existing;
-            return;
-        }
-
-        var mapping = new EventActionMapping(title, [], kind);
-        Mappings.Add(mapping);
         MappingsList.SelectedItem = mapping;
-        RefreshRewardTitleSuggestions();
+        if (Mappings.Count > countBefore)
+        {
+            RefreshRewardTitleSuggestions();
+        }
     }
 
     /// <summary>Removes the selected mapping.</summary>
@@ -374,7 +358,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             return;
         }
 
-        Mappings.Remove(selected);
+        editor.Remove(selected);
         RefreshRewardTitleSuggestions();
         RefreshActionsList();
     }
@@ -390,7 +374,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
 
         if (ShowAddActionDialog() is { } action)
         {
-            ReplaceMappingActions(mapping, [.. mapping.Actions, action]);
+            KeepSelection(editor.AppendAction(mapping, action));
             RefreshActionsList();
         }
     }
@@ -413,9 +397,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         var index = ActionsList.SelectedIndex;
         if (ShowEditActionDialog(selected.Action) is { } updated)
         {
-            var newActions = mapping.Actions.ToList();
-            newActions[index] = updated;
-            ReplaceMappingActions(mapping, newActions);
+            KeepSelection(editor.ReplaceActionAt(mapping, index, updated));
             RefreshActionsList();
         }
     }
@@ -429,15 +411,13 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             return;
         }
 
-        if (ActionsList.SelectedItem is not ActionListItem selected)
+        if (ActionsList.SelectedItem is not ActionListItem)
         {
             StatusText.Text = "Select an action to remove.";
             return;
         }
 
-        var newActions = mapping.Actions.ToList();
-        newActions.RemoveAt(ActionsList.SelectedIndex);
-        ReplaceMappingActions(mapping, newActions);
+        KeepSelection(editor.RemoveActionAt(mapping, ActionsList.SelectedIndex));
         RefreshActionsList();
     }
 
@@ -489,16 +469,29 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// <param name="newActions">Its new actions, in order.</param>
     protected void ReplaceMappingActions(EventActionMapping mapping, List<IEventAction> newActions)
     {
-        var idx = Mappings.IndexOf(mapping);
-        if (idx < 0) return;
         // Captured before the swap: WPF's ListBox drops the old item from its selection
-        // synchronously on the Replace notification Mappings[idx] = updated raises below, so
-        // MappingsList.SelectedItem no longer references `mapping` by the time this checks it.
+        // synchronously on the Replace notification the editor raises, so
+        // MappingsList.SelectedItem no longer references `mapping` once the swap has happened.
         var wasSelected = ReferenceEquals(MappingsList.SelectedItem, mapping);
-        var updated = mapping with { Actions = newActions };
-        Mappings[idx] = updated;
-        if (wasSelected)
+        var updated = editor.ReplaceActions(mapping, newActions);
+        if (wasSelected && updated is not null)
+        {
             MappingsList.SelectedItem = updated;
+        }
+    }
+
+    /// <summary>
+    /// Re-selects the selected mapping's replacement after the editor changed its actions: WPF's
+    /// ListBox drops a replaced item from its selection, so without this the actions list would
+    /// empty after every action change.
+    /// </summary>
+    /// <param name="updated">The replacement from the editor, or null if the mapping was no longer in the list.</param>
+    private void KeepSelection(EventActionMapping? updated)
+    {
+        if (updated is not null)
+        {
+            MappingsList.SelectedItem = updated;
+        }
     }
 
     /// <summary>
@@ -509,19 +502,12 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// <returns>The number of actions removed across all mappings; 0 if none matched.</returns>
     protected int RemoveActions(Func<IEventAction, bool> shouldRemove)
     {
-        var removedCount = 0;
-        foreach (var mapping in Mappings.ToList())
-        {
-            var remaining = mapping.Actions.Where(a => !shouldRemove(a)).ToList();
-            if (remaining.Count != mapping.Actions.Count)
-            {
-                removedCount += mapping.Actions.Count - remaining.Count;
-                ReplaceMappingActions(mapping, remaining);
-            }
-        }
-
+        // Replacing a mapping drops it from the ListBox's selection; its index doesn't change.
+        var selectedIndex = MappingsList.SelectedIndex;
+        var removedCount = editor.RemoveActions(shouldRemove);
         if (removedCount > 0)
         {
+            MappingsList.SelectedIndex = selectedIndex;
             RefreshActionsList();
         }
         return removedCount;
