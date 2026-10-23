@@ -56,13 +56,14 @@ public sealed class LegacyConfigMigration
         where TLegacy : class
     {
         var path = Path.Combine(directory, fileName);
-        if (!File.Exists(path))
+        var json = TryReadText(path, out var missing);
+        if (missing)
         {
             return LegacyConfigReadStatus.Missing;
         }
 
         FoundAny = true;
-        var legacy = TryDeserialize<TLegacy>(path);
+        var legacy = json is null ? null : TryDeserialize<TLegacy>(json, path);
         if (legacy is null || !PassesValidation(legacy, isValid, path))
         {
             Succeeded = false;
@@ -90,16 +91,44 @@ public sealed class LegacyConfigMigration
         return false;
     }
 
-    /// <summary>Parses the file at <paramref name="path"/>, logging rather than throwing on a read or parse failure.</summary>
-    /// <typeparam name="TLegacy">The legacy file's shape.</typeparam>
+    /// <summary>
+    /// Reads the file at <paramref name="path"/>. Only a file that isn't there counts as missing:
+    /// one that exists but can't be read (a permission error, a lock, a folder of that name)
+    /// is logged and reported as unreadable, so the migration can't save a merge without it.
+    /// </summary>
     /// <param name="path">The legacy file's full path.</param>
-    /// <returns>The parsed file; <see langword="null"/> when it couldn't be read or parsed, or holds JSON <c>null</c>.</returns>
-    private TLegacy? TryDeserialize<TLegacy>(string path)
+    /// <param name="missing">Set to true when the file (or its folder) doesn't exist.</param>
+    /// <returns>The file's text; <see langword="null"/> when it's missing or couldn't be read.</returns>
+    private static string? TryReadText(string path, out bool missing)
+    {
+        missing = false;
+        try
+        {
+            return File.ReadAllText(path);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            missing = true;
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Debug.WriteLine($"Failed to migrate legacy config '{path}': {ex}");
+            return null;
+        }
+    }
+
+    /// <summary>Parses a legacy file's text, logging rather than throwing when it isn't valid JSON.</summary>
+    /// <typeparam name="TLegacy">The legacy file's shape.</typeparam>
+    /// <param name="json">The legacy file's text.</param>
+    /// <param name="path">The legacy file's full path, for the log message.</param>
+    /// <returns>The parsed file; <see langword="null"/> when it isn't valid JSON or holds JSON <c>null</c>.</returns>
+    private TLegacy? TryDeserialize<TLegacy>(string json, string path)
         where TLegacy : class
     {
         try
         {
-            var legacy = JsonSerializer.Deserialize<TLegacy>(File.ReadAllText(path), serializerOptions);
+            var legacy = JsonSerializer.Deserialize<TLegacy>(json, serializerOptions);
             if (legacy is null)
             {
                 Debug.WriteLine($"Failed to migrate legacy config '{path}': deserialized to null.");
@@ -107,7 +136,7 @@ public sealed class LegacyConfigMigration
 
             return legacy;
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        catch (JsonException ex)
         {
             Debug.WriteLine($"Failed to migrate legacy config '{path}': {ex}");
             return null;

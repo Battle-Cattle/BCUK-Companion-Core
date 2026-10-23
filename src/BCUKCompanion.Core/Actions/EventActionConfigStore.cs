@@ -21,10 +21,16 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
 
     /// <summary>Creates a store for <c>%APPDATA%\<paramref name="dataFolderName"/>\<paramref name="configFileName"/></c>.</summary>
     /// <param name="dataFolderName">The app's own data folder name (see <c>CompanionTrayAppOptions.DataFolderName</c>).</param>
-    /// <param name="configFileName">The config file's name.</param>
+    /// <param name="configFileName">The config file's name, relative to the data folder.</param>
     /// <param name="registry">The action kinds the file's mappings can contain.</param>
+    /// <exception cref="ArgumentException"><paramref name="configFileName"/> is a rooted path.</exception>
     protected EventActionConfigStore(string dataFolderName, string configFileName, EventActionTypeRegistry registry)
     {
+        if (Path.IsPathRooted(configFileName))
+        {
+            throw new ArgumentException("The config file name must be relative to the data folder.", nameof(configFileName));
+        }
+
         ConfigFilePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), dataFolderName, configFileName);
         serializerOptions = new JsonSerializerOptions
@@ -87,7 +93,7 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
 
     /// <summary>The folder holding the config file.</summary>
     private string DataFolderPath =>
-        // ConfigFilePath is always Path.Combine(<AppData>, dataFolderName, configFileName), so it has a parent folder.
+        // The constructor rejects a rooted configFileName, so ConfigFilePath always sits inside a folder.
         Path.GetDirectoryName(ConfigFilePath)!;
 
     /// <summary>Reads and parses the existing file. A file that isn't valid JSON is backed up and replaced by a new <typeparamref name="TConfig"/>; I/O and permission errors propagate.</summary>

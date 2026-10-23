@@ -178,4 +178,18 @@ public sealed class LegacyConfigMigrationTests : IDisposable
         Assert.Equal(["current"], config.Names);
         Assert.Empty(store.Statuses);
     }
+
+    [Fact]
+    public void Load_LegacyFileThatExistsButCannotBeRead_CountsAsFailedAndDoesNotSave()
+    {
+        // A folder with the legacy file's name: File.Exists is false for it, but it isn't missing.
+        Directory.CreateDirectory(Path.Combine(directory, "legacy-mappings.json"));
+        WriteLegacy("legacy-names.json", """{ "Names": [ "desk lamp" ] }""");
+
+        var config = store.Load();
+
+        Assert.Equal(["desk lamp"], config.Names);
+        Assert.Equal([LegacyConfigReadStatus.Failed, LegacyConfigReadStatus.Read], store.Statuses);
+        Assert.False(File.Exists(store.ConfigFilePath));
+    }
 }
