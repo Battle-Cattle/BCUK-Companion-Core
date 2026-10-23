@@ -3,7 +3,7 @@ using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
 using Xunit;
 
-namespace BCUKCompanion.Core.Tests;
+namespace BCUKCompanion.Core.Tests.Events;
 
 public class CompanionEventStreamTests
 {
