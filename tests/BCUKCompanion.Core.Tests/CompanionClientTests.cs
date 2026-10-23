@@ -177,6 +177,8 @@ public class CompanionClientTests
 
         // A login finishing on another thread while the rejected token is being deleted.
         Task saving = Task.Run(() => client.SetManualToken("new"));
+        // A negative wait: there's no signal for "blocked on the lock", so give a save that
+        // wrongly skipped the lock time to finish. The check can only miss the bug, never flake.
         await Task.Delay(100);
         Assert.False(saving.IsCompleted);
         tokenStore.ReleaseClear.Set();

@@ -162,11 +162,26 @@ public sealed class ApplyUpdateScriptTests : IDisposable
 
     private static async Task WaitForFileAsync(string path)
     {
-        var stopwatch = Stopwatch.StartNew();
-        while (!File.Exists(path))
+        var appeared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Every path passed here is a file under root, so it always has a directory.
+        using var watcher = new FileSystemWatcher(Path.GetDirectoryName(path)!, Path.GetFileName(path));
+        watcher.Created += (_, _) => appeared.TrySetResult();
+        watcher.Renamed += (_, _) => appeared.TrySetResult();
+        watcher.EnableRaisingEvents = true;
+
+        // Checked after the watcher starts, so a file created before then isn't missed.
+        if (File.Exists(path))
         {
-            Assert.True(stopwatch.Elapsed < ScriptTimeout, $"{Path.GetFileName(path)} never appeared.");
-            await Task.Delay(100);
+            return;
+        }
+
+        try
+        {
+            await appeared.Task.WaitAsync(ScriptTimeout);
+        }
+        catch (TimeoutException)
+        {
+            Assert.Fail($"{Path.GetFileName(path)} never appeared.");
         }
     }
 
