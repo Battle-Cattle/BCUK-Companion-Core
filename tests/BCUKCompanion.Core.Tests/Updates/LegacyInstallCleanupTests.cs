@@ -136,7 +136,10 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         Assert.True(File.Exists(Path.Combine(installDir, "MyApp.deps.json")));
     }
 
+    // Runs on both jobs on purpose, so it has the Platform trait but no Windows-only skip: a
+    // Windows link is the case it guards, and Linux checks the same code path with a symlink.
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void Run_DoesNotFollowALocaleJunction()
     {
         string outsideLocale = Path.Combine(root, "elsewhere");
@@ -211,6 +214,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
     }
 
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void Run_WhenDepsJsonIsLocked_KeepsTheFilesItListsAndRetriesNextLaunch()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Only Windows enforces FileShare.None against other readers.");
@@ -228,6 +232,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
     }
 
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void Run_WhenAFileIsLocked_KeepsDepsJsonSoTheNextLaunchRetries()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Only Windows refuses to delete an open file.");
