@@ -297,11 +297,16 @@ public class CompanionEventStreamTests
 
         using var cts = new CancellationTokenSource();
         Task runTask = stream.RunAsync("token", cts.Token);
-        await Task.WhenAny(disconnected.Task, runTask).WaitAsync(TestTimeout);
-
-        Assert.False(runTask.IsCompleted, $"RunAsync ended early: {runTask.Exception?.GetBaseException()}");
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        try
+        {
+            await Task.WhenAny(disconnected.Task, runTask).WaitAsync(TestTimeout);
+            Assert.False(runTask.IsCompleted, $"RunAsync ended early: {runTask.Exception?.GetBaseException()}");
+        }
+        finally
+        {
+            cts.Cancel();
+            await SwallowCancellationAsync(runTask);
+        }
     }
 
     [Fact]
@@ -399,9 +404,17 @@ public class CompanionEventStreamTests
 
         using var cts = new CancellationTokenSource();
         Task runTask = stream.RunAsync("token", cts.Token);
-        await Task.WhenAny(ended.Task, runTask).WaitAsync(TestTimeout);
-        cts.Cancel();
-        await SwallowCancellationAsync(runTask);
+        try
+        {
+            await Task.WhenAny(ended.Task, runTask).WaitAsync(TestTimeout);
+        }
+        finally
+        {
+            // Stop the stream even if the wait timed out, so it can't keep reconnecting.
+            cts.Cancel();
+            await SwallowCancellationAsync(runTask);
+        }
+
         Assert.True(ended.Task.IsCompleted, "RunAsync ended before the expected connections did.");
     }
 

@@ -197,8 +197,15 @@ public class AckProgressPingerTests
             _ => { Interlocked.Increment(ref pings); pinged.TrySetResult(); return Task.FromResult(true); },
             TimeSpan.FromMilliseconds(1));
 
-        await pinged.Task.WaitAsync(TestTimeout);
-        release.SetResult(true);
+        try
+        {
+            await pinged.Task.WaitAsync(TestTimeout);
+        }
+        finally
+        {
+            // Stop the ping loop even if the wait timed out.
+            release.TrySetResult(true);
+        }
 
         Assert.True(await run);
         Assert.True(Volatile.Read(ref pings) >= 1);
