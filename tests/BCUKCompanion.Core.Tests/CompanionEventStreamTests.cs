@@ -381,6 +381,7 @@ public class CompanionEventStreamTests
         await RunUntilDisconnectedAsync(stream);
 
         Assert.False(commandRaised);
+        Assert.NotNull(redemption);
     }
 
     /// <summary>
