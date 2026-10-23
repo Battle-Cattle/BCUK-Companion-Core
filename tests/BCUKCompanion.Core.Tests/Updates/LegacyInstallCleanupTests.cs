@@ -136,6 +136,8 @@ public sealed class LegacyInstallCleanupTests : IDisposable
         Assert.True(File.Exists(Path.Combine(installDir, "MyApp.deps.json")));
     }
 
+    // Runs on both jobs on purpose, so it has the Platform trait but no Windows-only skip: a
+    // Windows link is the case it guards, and Linux checks the same code path with a symlink.
     [SkippableFact]
     [Trait("Platform", "Windows")]
     public void Run_DoesNotFollowALocaleJunction()

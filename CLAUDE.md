@@ -159,7 +159,7 @@ Qlty reports function complexity, too many returns, deep nesting, long parameter
 - When modifying existing behaviour, update affected tests before committing. Never leave a passing-but-wrong test.
 - A fix for a bug or a review finding gets a test that fails without the fix.
 - A Shell change gets its test in `tests/BCUKCompanion.TrayApp.Shell.Tests`. Keep logic out of the windows so it can be tested: `BotEventHandler` takes a "run on the UI thread" delegate rather than a WPF `Dispatcher` for exactly this reason. Logic every companion app needs belongs in Core.
-- Windows-only tests (DPAPI token storage) are skipped on Linux and run in CI's Windows job. Don't count a Linux run as proof that those passed. Give a Windows-only Core test `[Trait("Platform", "Windows")]` as well as its `Skip.IfNot(OperatingSystem.IsWindows(), ...)`: the Windows job runs only the Core tests with that trait, since the Linux job runs the rest.
+- Windows-only tests (DPAPI token storage) are skipped on Linux and run in CI's Windows job. Don't count a Linux run as proof that those passed. Give a Windows-only Core test `[Trait("Platform", "Windows")]` as well as its `Skip.IfNot(OperatingSystem.IsWindows(), ...)`: the Windows job runs only the Core tests with that trait, since the Linux job runs the rest. A test that runs on both platforms but must also run on Windows (like `Run_DoesNotFollowALocaleJunction`, where a Windows link is the case it guards) gets the trait without the skip, and says why in a comment.
 
 ## ALWAYS: Before committing
 
