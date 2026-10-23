@@ -7,6 +7,7 @@ namespace BCUKCompanion.Core.Tests;
 public class DpapiFileTokenStoreTests
 {
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void RoundTripsSaveLoadClear()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "DPAPI is only supported on Windows.");
@@ -33,6 +34,7 @@ public class DpapiFileTokenStoreTests
     }
 
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void ClearRemovesATempFileLeftByAnInterruptedSave()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "DPAPI is only supported on Windows.");

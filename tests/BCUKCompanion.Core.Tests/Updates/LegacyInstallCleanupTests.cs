@@ -137,6 +137,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
     }
 
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void Run_DoesNotFollowALocaleJunction()
     {
         string outsideLocale = Path.Combine(root, "elsewhere");
@@ -211,6 +212,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
     }
 
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void Run_WhenDepsJsonIsLocked_KeepsTheFilesItListsAndRetriesNextLaunch()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Only Windows enforces FileShare.None against other readers.");
@@ -228,6 +230,7 @@ public sealed class LegacyInstallCleanupTests : IDisposable
     }
 
     [SkippableFact]
+    [Trait("Platform", "Windows")]
     public void Run_WhenAFileIsLocked_KeepsDepsJsonSoTheNextLaunchRetries()
     {
         Skip.IfNot(OperatingSystem.IsWindows(), "Only Windows refuses to delete an open file.");

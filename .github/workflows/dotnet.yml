@@ -13,30 +13,43 @@ jobs:
     name: Build & test Core (Linux)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
-      - run: dotnet build src/BCUKCompanion.Core
-      - run: dotnet test tests/BCUKCompanion.Core.Tests
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.*.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - run: dotnet restore tests/BCUKCompanion.Core.Tests
+      - run: dotnet build tests/BCUKCompanion.Core.Tests --no-restore -c Release
+      # Every Core test runs here; the Windows-only ones skip themselves and run in tray-app.
+      - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release
 
   tray-app:
     name: Build TrayApp Shell + Sample (Windows)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
-      - run: dotnet build src/BCUKCompanion.TrayApp.Shell
-      - run: dotnet build samples/BCUKCompanion.TrayApp.Sample
-      # The Linux job skips the Windows-only tests (DPAPI token storage); they run here.
-      - run: dotnet test tests/BCUKCompanion.Core.Tests
-      - run: dotnet test tests/BCUKCompanion.TrayApp.Shell.Tests
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.*.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+      # One restore and one build of the whole solution: Core, Shell, Sample and both test projects.
+      - run: dotnet restore
+      - run: dotnet build --no-restore -c Release
+      # The Linux job already ran the rest of the Core suite; only the tests that need Windows run here.
+      - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release --filter Platform=Windows
+      - run: dotnet test tests/BCUKCompanion.TrayApp.Shell.Tests --no-build -c Release
 
   publish-packages:
     name: Pack & publish NuGet packages
@@ -46,14 +59,21 @@ jobs:
     permissions:
       packages: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.x"
-      - run: dotnet pack src/BCUKCompanion.Core --configuration Release --output ./packages
-      - run: dotnet pack src/BCUKCompanion.TrayApp.Shell --configuration Release --output ./packages
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.*.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+      # Building the Shell builds Core too, so both packs can skip the build.
+      - run: dotnet build src/BCUKCompanion.TrayApp.Shell -c Release
+      - run: dotnet pack src/BCUKCompanion.Core -c Release --no-build --output ./packages
+      - run: dotnet pack src/BCUKCompanion.TrayApp.Shell -c Release --no-build --output ./packages
       - run: >
           dotnet nuget push ./packages/*.nupkg
           --source https://nuget.pkg.github.com/Battle-Cattle/index.json
