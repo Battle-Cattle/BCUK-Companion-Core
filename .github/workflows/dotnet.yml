@@ -31,7 +31,6 @@ jobs:
       - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release --settings coverage.runsettings --results-directory coverage
       # A publish-coverage job publishes this to Qlty.
       - name: Keep lcov coverage for the Qlty upload
-        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-linux
@@ -61,7 +60,6 @@ jobs:
       - run: dotnet test tests/BCUKCompanion.TrayApp.Shell.Tests --no-build -c Release --settings coverage.runsettings --results-directory coverage
       # A publish-coverage job publishes this to Qlty.
       - name: Keep lcov coverage for the Qlty upload
-        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-windows
@@ -72,11 +70,12 @@ jobs:
   # trades for an upload; the restore, build and test steps never see it. GitHub gives fork and
   # Dependabot pull requests no OIDC token, and qlty-action fails the job when it can't get one,
   # so those runs skip the upload.
+  # Each also waits for its own test job to pass: a failed one leaves no report to upload.
   coverage-linux:
     name: Publish Linux coverage to Qlty
     needs: core
     if: >-
-      always() &&
+      needs.core.result == 'success' &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
     runs-on: ubuntu-latest
@@ -105,7 +104,7 @@ jobs:
     name: Publish Windows coverage to Qlty
     needs: tray-app
     if: >-
-      always() &&
+      needs.tray-app.result == 'success' &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
     runs-on: windows-latest
