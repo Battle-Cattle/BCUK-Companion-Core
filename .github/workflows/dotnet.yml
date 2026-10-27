@@ -33,8 +33,13 @@ jobs:
       # Every Core test runs here; the Windows-only ones skip themselves and run in tray-app.
       # coverage.runsettings writes lcov coverage under coverage/ for the Qlty upload.
       - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release --settings coverage.runsettings --results-directory coverage
+      # GitHub gives fork and Dependabot pull requests no OIDC token, and qlty-action fails the
+      # job when it can't get one, so those runs skip the upload.
       - name: Publish coverage to Qlty
-        if: always()
+        if: >-
+          always() &&
+          (github.event_name != 'pull_request' ||
+           (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
         uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
         with:
           oidc: true
@@ -67,8 +72,13 @@ jobs:
       # The Linux job already ran the rest of the Core suite; only the tests that need Windows run here.
       - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release --filter Platform=Windows --settings coverage.runsettings --results-directory coverage
       - run: dotnet test tests/BCUKCompanion.TrayApp.Shell.Tests --no-build -c Release --settings coverage.runsettings --results-directory coverage
+      # GitHub gives fork and Dependabot pull requests no OIDC token, and qlty-action fails the
+      # job when it can't get one, so those runs skip the upload.
       - name: Publish coverage to Qlty
-        if: always()
+        if: >-
+          always() &&
+          (github.event_name != 'pull_request' ||
+           (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
         uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
         with:
           oidc: true
