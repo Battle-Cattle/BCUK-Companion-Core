@@ -12,6 +12,7 @@ out/
 # Test results
 [Tt]est[Rr]esult*/
 *.trx
+coverage/
 
 # NuGet
 *.nupkg

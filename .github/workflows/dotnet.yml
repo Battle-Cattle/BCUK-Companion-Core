@@ -12,6 +12,10 @@ jobs:
   core:
     name: Build & test Core (Linux)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Lets qlty-action exchange GitHub's OIDC token for a Qlty upload, instead of a stored coverage token.
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,11 +31,24 @@ jobs:
       - run: dotnet restore tests/BCUKCompanion.Core.Tests
       - run: dotnet build tests/BCUKCompanion.Core.Tests --no-restore -c Release
       # Every Core test runs here; the Windows-only ones skip themselves and run in tray-app.
-      - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release
+      # coverage.runsettings writes lcov coverage under coverage/ for the Qlty upload.
+      - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release --settings coverage.runsettings --results-directory coverage
+      - name: Publish coverage to Qlty
+        if: always()
+        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
+        with:
+          oidc: true
+          files: coverage/**/coverage.info
+          # The core and tray-app jobs each upload a part; Qlty merges them once both arrive.
+          total-parts-count: 2
 
   tray-app:
     name: Build TrayApp Shell + Sample (Windows)
     runs-on: windows-latest
+    permissions:
+      contents: read
+      # Lets qlty-action exchange GitHub's OIDC token for a Qlty upload, instead of a stored coverage token.
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,8 +65,16 @@ jobs:
       - run: dotnet restore
       - run: dotnet build --no-restore -c Release
       # The Linux job already ran the rest of the Core suite; only the tests that need Windows run here.
-      - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release --filter Platform=Windows
-      - run: dotnet test tests/BCUKCompanion.TrayApp.Shell.Tests --no-build -c Release
+      - run: dotnet test tests/BCUKCompanion.Core.Tests --no-build -c Release --filter Platform=Windows --settings coverage.runsettings --results-directory coverage
+      - run: dotnet test tests/BCUKCompanion.TrayApp.Shell.Tests --no-build -c Release --settings coverage.runsettings --results-directory coverage
+      - name: Publish coverage to Qlty
+        if: always()
+        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
+        with:
+          oidc: true
+          files: coverage/**/coverage.info
+          # The core and tray-app jobs each upload a part; Qlty merges them once both arrive.
+          total-parts-count: 2
 
   publish-packages:
     name: Pack & publish NuGet packages
