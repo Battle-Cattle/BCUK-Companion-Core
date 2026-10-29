@@ -2,6 +2,7 @@ using Xunit;
 
 namespace BCUKCompanion.TrayApp.Tests;
 
+[Collection(SharedShellState.Name)]
 public sealed class AppSettingsTests : IDisposable
 {
     private readonly string folderName = $"BCUKCompanion.TrayApp.Shell.Tests.{Guid.NewGuid():N}";

@@ -13,6 +13,9 @@ namespace BCUKCompanion.TrayApp.Updates;
 /// </summary>
 internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string dataFolderName)
 {
+    /// <summary>Starts the swap script's process; tests replace it to check what would run.</summary>
+    internal Action<ProcessStartInfo> StartProcess { get; init; } = startInfo => Process.Start(startInfo)?.Dispose();
+
     /// <summary>
     /// Downloads and extracts <paramref name="update"/>, then starts the script that swaps it in
     /// once this process exits. The caller must shut the app down straight after this returns.
@@ -57,7 +60,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             startInfo.ArgumentList.Add(arg);
         }
 
-        Process.Start(startInfo)?.Dispose();
+        StartProcess(startInfo);
     }
 
     /// <summary>Extracts the downloaded zip and checks it holds the app's executable, so a wrong or broken release is never swapped in.</summary>

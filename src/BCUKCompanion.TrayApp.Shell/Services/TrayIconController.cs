@@ -50,8 +50,15 @@ internal sealed class TrayIconController : IDisposable
             Visible = true,
         };
 
-        _notifyIcon.DoubleClick += (_, _) => RunSafely("Settings", () => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
+        _notifyIcon.DoubleClick += (_, _) => OnIconDoubleClicked();
     }
+
+    /// <summary>The underlying tray icon, for tests to read its text, menu and balloon.</summary>
+    internal NotifyIcon NotifyIcon => _notifyIcon;
+
+    /// <summary>Double-clicking the icon opens Settings, like its menu item.</summary>
+    internal void OnIconDoubleClicked() =>
+        RunSafely("Settings", () => OpenSettingsRequested?.Invoke(this, EventArgs.Empty));
 
     /// <summary>Adds a menu item whose click runs <paramref name="onClick"/> through <see cref="RunSafely"/>.</summary>
     /// <param name="menu">The context menu to add the item to.</param>

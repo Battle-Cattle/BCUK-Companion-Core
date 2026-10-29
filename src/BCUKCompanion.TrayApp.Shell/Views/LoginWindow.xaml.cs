@@ -16,6 +16,9 @@ public partial class LoginWindow : Window
     /// <summary>Raised when the user changes the server URL from this window, before any login attempt.</summary>
     public event EventHandler<string>? ServerHostChanged;
 
+    /// <summary>Opens the login page in the browser; tests replace it to stand in for the browser.</summary>
+    internal Func<Uri, Task> OpenBrowser { get; set; } = OpenBrowserAsync;
+
     /// <summary>Creates the window for <paramref name="companionClient"/>, showing <paramref name="botHost"/> as the server.</summary>
     /// <param name="companionClient">The client to log in with.</param>
     /// <param name="botHost">The current server URL.</param>
@@ -78,7 +81,7 @@ public partial class LoginWindow : Window
         SetBusy(true, string.Empty);
         try
         {
-            await _companionClient.LoginWithBrowserAsync(OpenBrowserAsync).ConfigureAwait(true);
+            await _companionClient.LoginWithBrowserAsync(OpenBrowser).ConfigureAwait(true);
             LoginSucceeded?.Invoke(this, EventArgs.Empty);
             Close();
         }
@@ -121,7 +124,7 @@ public partial class LoginWindow : Window
     /// <summary>Opens the login URL in the default browser, refusing anything but an http(s) URL.</summary>
     /// <param name="uri">The bot's login page URL.</param>
     /// <returns>An already-completed task once the browser has been started; throws <see cref="InvalidOperationException"/> for a non-web URL.</returns>
-    private static Task OpenBrowserAsync(Uri uri)
+    internal static Task OpenBrowserAsync(Uri uri)
     {
         // UseShellExecute launches whatever the URL points at, so only ever hand it a web URL —
         // never a file: path or other scheme a mis-set bot host could produce.
