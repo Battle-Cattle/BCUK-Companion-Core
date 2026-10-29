@@ -75,6 +75,12 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     /// <summary>Saves <see cref="BuildConfig"/> to the config file.</summary>
     protected readonly Button SaveButton = new() { Content = "Save", Width = 90, HorizontalAlignment = HorizontalAlignment.Right };
 
+    /// <summary>Shows a dialog modally and returns its result; tests replace it to drive the dialog.</summary>
+    internal Func<Window, bool?> ShowDialogWindow { get; set; } = window => window.ShowDialog();
+
+    /// <summary>Shows a test run's per-action results, given the report and the caption; tests replace it to read them.</summary>
+    internal Action<string, string> ShowTestResults { get; set; }
+
     /// <summary>The config the window opened with, for a subclass to read its integration-specific state from.</summary>
     protected TConfig InitialConfig { get; }
 
@@ -106,6 +112,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         dispatcher = new EventActionDispatcher(() => BuildConfig().Mappings, BuildContext);
 
         SaveButton.Click += async (_, _) => await OnSaveAsync().ConfigureAwait(true);
+        ShowTestResults = (report, caption) => MessageBox.Show(this, report, caption);
     }
 
     /// <summary>Builds the config to save from the window's current state: <see cref="Mappings"/> plus the subclass's own state.</summary>
@@ -141,7 +148,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     {
         var editors = CreateActionEditors().Append(new DelayActionEditor()).ToList();
         var dialog = new EventActionEditDialog(editors, BuildContext(), existing) { Owner = this };
-        return dialog.ShowDialog() == true ? dialog.Result : null;
+        return ShowDialogWindow(dialog) == true ? dialog.Result : null;
     }
 
     /// <summary>
@@ -237,6 +244,9 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     // tell it's been superseded and skip applying its (possibly stale) result out of order.
     private int _rewardTitleRefreshSequence;
 
+    /// <summary>The latest server suggestion fetch (completed when none has started); tests await it instead of sleeping.</summary>
+    internal Task PendingServerRefresh { get; private set; } = Task.CompletedTask;
+
     /// <summary>Refreshes <see cref="RewardTitleCombo"/>'s suggestions: names already mapped straight away, then the bot's live rewards or commands once they arrive.</summary>
     protected void RefreshRewardTitleSuggestions()
     {
@@ -252,7 +262,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         // local-only suggestion list above with the live reward (or command) catalog once it arrives.
         if (getCompanionClient?.Invoke() is { IsLoggedIn: true } client)
         {
-            _ = RefreshRewardTitleSuggestionsFromServerAsync(client, kind, sequence);
+            PendingServerRefresh = RefreshRewardTitleSuggestionsFromServerAsync(client, kind, sequence);
         }
     }
 
@@ -460,7 +470,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
             return;
         }
 
-        MessageBox.Show(this, report, $"Test results: {result.RewardTitle}");
+        ShowTestResults(report, $"Test results: {result.RewardTitle}");
         StatusText.Text = result.AllSucceeded ? "Test succeeded." : "Test completed with errors.";
     }
 
