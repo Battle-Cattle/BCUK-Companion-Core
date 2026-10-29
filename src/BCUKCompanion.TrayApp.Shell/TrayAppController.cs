@@ -34,11 +34,15 @@ internal sealed class TrayAppController : IDisposable
     private readonly CompanionTrayAppOptions _options;
     private readonly TrayAppEnvironment _environment;
     private Mutex? _singleInstanceMutex;
-    private AppSettings _settings = null!;
-    private Uri _botHost = null!;
-    private CompanionClient _companionClient = null!;
-    private TrayIconController _trayIcon = null!;
-    private BotEventHandler _botEvents = null!;
+    // Start() assigns these before anything that reads them can run: the tray menu, the windows
+    // and the client's event handlers all start from Start(). A Start() that loses the single-instance
+    // lock leaves them null, which is why ReportUnhandledError checks _trayIcon for null and
+    // Dispose uses ?. on _companionClient and _trayIcon.
+    private AppSettings _settings = null!; // set by Start()
+    private Uri _botHost = null!; // set by Start()
+    private CompanionClient _companionClient = null!; // set by Start(); null-checked in Dispose
+    private TrayIconController _trayIcon = null!; // set by Start(); null-checked in ReportUnhandledError and Dispose
+    private BotEventHandler _botEvents = null!; // set by Start()
     private LoginWindow? _loginWindow;
     private SettingsWindow? _settingsWindow;
     private bool _isConnected;
@@ -52,10 +56,10 @@ internal sealed class TrayAppController : IDisposable
         _environment = environment;
     }
 
-    /// <summary>The tray icon; null until <see cref="Start"/> has created it.</summary>
+    /// <summary>The tray icon; read it only after <see cref="Start"/> has returned true.</summary>
     internal TrayIconController TrayIcon => _trayIcon;
 
-    /// <summary>The current companion client; null until <see cref="Start"/> has created it.</summary>
+    /// <summary>The current companion client; read it only after <see cref="Start"/> has returned true.</summary>
     internal CompanionClient Client => _companionClient;
 
     /// <summary>The open login window, if any.</summary>
