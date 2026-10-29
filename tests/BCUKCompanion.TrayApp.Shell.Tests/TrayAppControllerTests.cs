@@ -225,6 +225,43 @@ public sealed class TrayAppControllerTests : IDisposable
     }
 
     [SkippableFact]
+    public void ATokenThatCantBeDeleted_IsReportedAndListeningStops()
+    {
+        WindowsOnly.Skip();
+        bot.Respond = _ => RouteHttpHandler.Json("{}", HttpStatusCode.Unauthorized);
+        SaveToken("token");
+        // Held open without delete sharing, so discarding the rejected token fails.
+        using var locked = new FileStream(AppPaths.TokenFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        WpfTest.Run(async () =>
+        {
+            using var controller = Controller();
+            controller.Start();
+
+            await WpfTest.WaitUntil(() => controller.LoginWindow is not null);
+            Assert.StartsWith("Test Companion: Couldn't discard the rejected login:", Balloon(controller));
+            Assert.True(controller.Client.IsLoggedIn);
+        });
+    }
+
+    [SkippableFact]
+    public void Start_ChecksForUpdatesWhenAskedTo()
+    {
+        WindowsOnly.Skip();
+        WpfTest.Run(() =>
+        {
+            // The check runs in the background, and a launch check never prompts: for a repo with no
+            // releases it finds nothing and stays silent.
+            using var controller = Controller(Options(updates: new CompanionUpdateOptions
+            {
+                RepoOwner = "Battle-Cattle",
+                RepoName = "BCUK-Companion-NoSuchRepo",
+            }));
+
+            Assert.True(controller.Start());
+        });
+    }
+
+    [SkippableFact]
     public void ConnectionState_ShowsOnTheTrayAndInSettings()
     {
         WindowsOnly.Skip();
