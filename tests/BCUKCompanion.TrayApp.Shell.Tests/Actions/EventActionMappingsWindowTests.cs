@@ -168,7 +168,9 @@ public sealed class EventActionMappingsWindowTests : IDisposable
         WindowsOnly.Skip();
         WpfTest.Run(() =>
         {
-            var window = new TestWindow(store, Config(Mapping("Hydrate")));
+            // The dialog's Owner must be a window that has been shown.
+            var window = new TestWindow(store, Config(Mapping("Hydrate"))) { ShowActivated = false, ShowInTaskbar = false };
+            window.Show();
             window.Select(0);
 
             window.AnswerDialogWithDelay("3");
@@ -192,6 +194,7 @@ public sealed class EventActionMappingsWindowTests : IDisposable
             window.Click("Remove Action");
             Assert.Equal(["Delay 7s"], window.ActionList.Items.Cast<object>().Select(i => i.ToString()));
             Assert.Equal("Hydrate", ((EventActionMapping)window.MappingList.SelectedItem).RewardTitle);
+            window.Close();
         });
     }
 
@@ -286,7 +289,7 @@ public sealed class EventActionMappingsWindowTests : IDisposable
         WindowsOnly.Skip();
         WpfTest.Run(() =>
         {
-            var window = new TestWindow(store, Config(Mapping("Hydrate", new StubAction(), new DelayAction()), Mapping("Stretch", new StubAction())));
+            var window = new TestWindow(store, Config(Mapping("Hydrate", new StubAction(), new DelayAction { DelaySeconds = 5 }), Mapping("Stretch", new StubAction())));
             window.Select(0);
 
             Assert.Equal(0, window.Remove(a => a.Kind == "nothing"));
@@ -324,7 +327,7 @@ public sealed class EventActionMappingsWindowTests : IDisposable
             "/api/companion/rewards" => RouteHttpHandler.Json(
                 """{"ok":true,"rewards":[{"id":"1","title":"Hydrate","isEnabled":true},{"id":"2","title":"Paused","isEnabled":false}]}"""),
             "/api/companion/commands" => RouteHttpHandler.Json(
-                """{"ok":true,"commands":[{"id":"1","name":"hug","trigger":"!hug","companionEnabled":true},{"id":"2","name":"quiet","trigger":"!quiet","companionEnabled":false}]}"""),
+                """{"ok":true,"commands":[{"id":1,"name":"hug","trigger":"!hug","companionEnabled":true},{"id":2,"name":"quiet","trigger":"!quiet","companionEnabled":false}]}"""),
             _ => RouteHttpHandler.Json("{}", System.Net.HttpStatusCode.NotFound),
         });
         using var client = new CompanionClient(new Uri("https://bot.example"), new MemoryTokenStore("token"), new HttpClient(handler));

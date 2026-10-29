@@ -99,6 +99,45 @@ public sealed class UpdateInstallerTests : IDisposable
     }
 
     [Fact]
+    public async Task PrepareAndLaunchAsync_StartsTheSwapScriptWithEachPathAsItsOwnArgument()
+    {
+        string dataFolderName = $"bcuk-update-installer-{Guid.NewGuid():N}";
+        string workRoot = Path.Combine(Path.GetTempPath(), $"{dataFolderName}.Update");
+        string exeName = Path.GetFileName(Environment.ProcessPath)!;
+        byte[] archive = File.ReadAllBytes(CreateZip((exeName, "new")));
+        var checker = new GitHubReleaseUpdateChecker(
+            "Battle-Cattle", "App", new AppVersion(new Version(1, 0, 0), false),
+            new HttpClient(new DownloadHandler(archive, Convert.ToHexString(SHA256.HashData(archive)))));
+        var update = new AvailableUpdate(
+            new Version(1, 1, 0),
+            "v1.1.0",
+            new Uri("https://example.test/update.zip"),
+            new Uri("https://example.test/release"),
+            new Uri("https://example.test/update.zip.sha256"));
+        System.Diagnostics.ProcessStartInfo? started = null;
+
+        try
+        {
+            await new UpdateInstaller(checker, dataFolderName) { StartProcess = info => started = info }.PrepareAndLaunchAsync(update);
+
+            Assert.Equal("powershell.exe", started!.FileName);
+            Assert.False(started.UseShellExecute);
+            var args = started.ArgumentList.ToList();
+            string script = args[args.IndexOf("-File") + 1];
+            Assert.Equal(UpdateInstaller.ApplyUpdateScript, File.ReadAllText(script));
+            Assert.Equal(Environment.ProcessId.ToString(), args[args.IndexOf("-ProcessId") + 1]);
+            Assert.Equal("new", File.ReadAllText(Path.Combine(args[args.IndexOf("-Source") + 1], exeName)));
+        }
+        finally
+        {
+            if (Directory.Exists(workRoot))
+            {
+                Directory.Delete(workRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void ToScriptArguments_PassesEachValueAsItsOwnArgument()
     {
         var request = new ApplyUpdateRequest(1234, @"C:\tmp\files", @"C:\Program Files\My App", @"C:\Program Files\My App\MyApp.exe", @"C:\tmp");
