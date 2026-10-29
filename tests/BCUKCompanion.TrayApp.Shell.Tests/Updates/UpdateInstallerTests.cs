@@ -103,7 +103,7 @@ public sealed class UpdateInstallerTests : IDisposable
     {
         string dataFolderName = $"bcuk-update-installer-{Guid.NewGuid():N}";
         string workRoot = Path.Combine(Path.GetTempPath(), $"{dataFolderName}.Update");
-        string exeName = Path.GetFileName(Environment.ProcessPath)!;
+        string exeName = Path.GetFileName(Environment.ProcessPath) ?? throw new InvalidOperationException("The test host has no process path.");
         byte[] archive = File.ReadAllBytes(CreateZip((exeName, "new")));
         var checker = new GitHubReleaseUpdateChecker(
             "Battle-Cattle", "App", new AppVersion(new Version(1, 0, 0), false),
@@ -120,7 +120,8 @@ public sealed class UpdateInstallerTests : IDisposable
         {
             await new UpdateInstaller(checker, dataFolderName) { StartProcess = info => started = info }.PrepareAndLaunchAsync(update);
 
-            Assert.Equal("powershell.exe", started!.FileName);
+            Assert.NotNull(started);
+            Assert.Equal("powershell.exe", started.FileName);
             Assert.False(started.UseShellExecute);
             var args = started.ArgumentList.ToList();
             string script = args[args.IndexOf("-File") + 1];

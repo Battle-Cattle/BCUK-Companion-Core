@@ -7,8 +7,11 @@ namespace BCUKCompanion.TrayApp.Tests.Services;
 // NotifyIcon is WinForms, which only exists on Windows.
 public sealed class TrayIconControllerTests
 {
+    private static ToolStripItemCollection MenuItems(TrayIconController tray) =>
+        Assert.IsType<ContextMenuStrip>(tray.NotifyIcon.ContextMenuStrip).Items;
+
     private static void Click(TrayIconController tray, string label) =>
-        tray.NotifyIcon.ContextMenuStrip!.Items.Cast<ToolStripItem>().Single(i => i.Text == label).PerformClick();
+        MenuItems(tray).Cast<ToolStripItem>().Single(i => i.Text == label).PerformClick();
 
     [SkippableFact]
     public void Menu_ListsTheBuiltInItemsAroundTheHostsOwn()
@@ -18,7 +21,7 @@ public sealed class TrayIconControllerTests
         {
             using var tray = new TrayIconController("Companion", [new TrayMenuItem("Actions...", () => { })]);
 
-            var items = tray.NotifyIcon.ContextMenuStrip!.Items.Cast<ToolStripItem>()
+            var items = MenuItems(tray).Cast<ToolStripItem>()
                 .Select(i => i is ToolStripSeparator ? "-" : i.Text);
             Assert.Equal(["Login / Account", "Settings", "-", "Actions...", "-", "Exit"], items);
             Assert.Equal("Companion", tray.NotifyIcon.Text);
@@ -34,7 +37,7 @@ public sealed class TrayIconControllerTests
         {
             using var tray = new TrayIconController("Companion");
 
-            Assert.Equal(4, tray.NotifyIcon.ContextMenuStrip!.Items.Count);
+            Assert.Equal(4, MenuItems(tray).Count);
         });
     }
 
@@ -72,8 +75,10 @@ public sealed class TrayIconControllerTests
 
             Click(tray, "Broken");
 
-            Assert.Equal("Broken", failure!.Value.Label);
-            Assert.Equal("boom", failure.Value.Error.Message);
+            Assert.True(failure.HasValue);
+            var (label, error) = failure.Value;
+            Assert.Equal("Broken", label);
+            Assert.Equal("boom", error.Message);
         });
     }
 

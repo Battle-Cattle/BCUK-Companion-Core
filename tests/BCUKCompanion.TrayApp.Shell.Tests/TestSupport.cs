@@ -26,7 +26,7 @@ internal sealed class RouteHttpHandler(Func<HttpRequestMessage, HttpResponseMess
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
-        Paths.Enqueue(request.RequestUri!.AbsolutePath);
+        Paths.Enqueue(request.RequestUri?.AbsolutePath ?? string.Empty);
         // Off the caller's thread, so a response that waits can't block a UI thread awaiting it.
         return Task.Run(() => Respond(request), cancellationToken);
     }
@@ -47,8 +47,8 @@ internal sealed class TempAppFolder : IDisposable
     {
         foreach (var file in new[] { AppPaths.SettingsFile, AppPaths.TokenFile })
         {
-            var directory = Path.GetDirectoryName(file)!;
-            if (Directory.Exists(directory))
+            var directory = Path.GetDirectoryName(file);
+            if (directory is not null && Directory.Exists(directory))
             {
                 Directory.Delete(directory, recursive: true);
             }

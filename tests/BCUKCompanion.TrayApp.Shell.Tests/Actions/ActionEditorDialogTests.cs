@@ -99,7 +99,8 @@ public sealed class ActionEditorDialogTests
             });
 
             Assert.True(result);
-            Assert.Equal("preferred", dialog.Result!.Kind);
+            Assert.NotNull(dialog.Result);
+            Assert.Equal("preferred", dialog.Result.Kind);
         });
     }
 
@@ -112,7 +113,8 @@ public sealed class ActionEditorDialogTests
             var dialog = new EventActionEditDialog([new StubEditor("a", false), new StubEditor("b", false)], new EmptyContext());
 
             Assert.True(WpfTest.ShowDialog(dialog, window => WpfTest.Click(window, "OK")));
-            Assert.Equal("a", dialog.Result!.Kind);
+            Assert.NotNull(dialog.Result);
+            Assert.Equal("a", dialog.Result.Kind);
         });
     }
 
@@ -131,7 +133,8 @@ public sealed class ActionEditorDialogTests
             WpfTest.ShowDialog(dialog, window => WpfTest.Click(window, "OK"));
 
             Assert.Same(existing, second.Loaded);
-            Assert.Equal("second", dialog.Result!.Kind);
+            Assert.NotNull(dialog.Result);
+            Assert.Equal("second", dialog.Result.Kind);
         });
     }
 

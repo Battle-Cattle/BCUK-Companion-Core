@@ -18,7 +18,8 @@ public sealed class LoginAndLogoutTests
         public Task Open(Uri loginUrl)
         {
             var query = System.Web.HttpUtility.ParseQueryString(loginUrl.Query);
-            Callback = Task.Run(() => http.GetAsync($"{query["redirect_uri"]}?code=the-code&state={Uri.EscapeDataString(query["state"]!)}"));
+            var state = query["state"] ?? throw new InvalidOperationException($"The login URL has no state: {loginUrl}");
+            Callback = Task.Run(() => http.GetAsync($"{query["redirect_uri"]}?code=the-code&state={Uri.EscapeDataString(state)}"));
             return Task.CompletedTask;
         }
 
@@ -45,7 +46,8 @@ public sealed class LoginAndLogoutTests
         var ex = await Assert.ThrowsAsync<CompanionAuthException>(() => client.LoginAsync(browser.Open, TimeSpan.FromSeconds(10)));
 
         Assert.Equal(expected, ex.Message);
-        using var page = await browser.Callback!;
+        Assert.NotNull(browser.Callback);
+        using var page = await browser.Callback;
         Assert.Equal(HttpStatusCode.BadGateway, page.StatusCode);
     }
 
@@ -57,11 +59,14 @@ public sealed class LoginAndLogoutTests
             BotHost, store, new HttpClient(new FakeHttpMessageHandler(HttpStatusCode.OK, """{"token":"issued"}""")));
         using var browser = new FakeBrowser();
 
-        await client.LoginWithBrowserAsync(browser.Open);
+        // Bounded, so a callback that never arrives fails the test instead of waiting out the 5-minute login timeout.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await client.LoginWithBrowserAsync(browser.Open, timeout.Token);
 
         Assert.Equal("issued", store.Load());
         Assert.True(client.IsLoggedIn);
-        using var page = await browser.Callback!;
+        Assert.NotNull(browser.Callback);
+        using var page = await browser.Callback;
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
     }
 

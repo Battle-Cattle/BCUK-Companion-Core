@@ -17,7 +17,7 @@ public sealed class CompanionEventStreamConnectionTests
         Func<HttpResponseMessage>? recent = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(request.RequestUri!.AbsolutePath == "/api/companion/events/recent"
+            Task.FromResult(request.RequestUri?.AbsolutePath == "/api/companion/events/recent"
                 ? (recent ?? (() => Ok("""{"ok":true,"events":[]}""")))()
                 : stream());
     }

@@ -36,10 +36,9 @@ internal static class WpfTest
                 var task = test();
                 task.ContinueWith(_ => frame.Continue = false, TaskScheduler.FromCurrentSynchronizationContext());
                 Dispatcher.PushFrame(frame);
-                if (task.IsFaulted)
-                {
-                    failure = task.Exception!.InnerException;
-                }
+
+                // Rethrows a fault or a cancellation, so neither passes as success.
+                task.GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
@@ -72,11 +71,13 @@ internal static class WpfTest
 
     /// <summary>
     /// Shows <paramref name="window"/> as a dialog, runs <paramref name="drive"/> once it has loaded,
-    /// and closes it if <paramref name="drive"/> didn't. Rethrows anything <paramref name="drive"/> threw.
+    /// and closes it if <paramref name="drive"/> didn't. Returns only once <paramref name="drive"/> has
+    /// finished, even if it closed the dialog part-way, and rethrows anything it threw.
     /// </summary>
     public static bool? ShowDialog(Window window, Func<Window, Task> drive)
     {
         Exception? failure = null;
+        var driven = new TaskCompletionSource();
         window.ShowActivated = false;
         window.ShowInTaskbar = false;
         window.Loaded += (_, _) => window.Dispatcher.InvokeAsync(async () =>
@@ -89,14 +90,26 @@ internal static class WpfTest
             {
                 failure = ex;
             }
-
-            if (window.IsVisible)
+            finally
             {
-                window.Close();
+                if (window.IsVisible)
+                {
+                    window.Close();
+                }
+
+                driven.TrySetResult();
             }
         });
 
         var result = window.ShowDialog();
+        if (!driven.Task.IsCompleted)
+        {
+            // The dialog closed while the driver was still awaiting something: let it finish.
+            var frame = new DispatcherFrame();
+            driven.Task.ContinueWith(_ => frame.Continue = false, TaskScheduler.Default);
+            Dispatcher.PushFrame(frame);
+        }
+
         if (failure is not null)
         {
             ExceptionDispatchInfo.Capture(failure).Throw();

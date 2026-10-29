@@ -187,7 +187,8 @@ public sealed class LoginWindowTests
             {
                 busyWhileWaiting = !window.SaveTokenButton.IsEnabled;
                 var query = System.Web.HttpUtility.ParseQueryString(loginUrl.Query);
-                _ = Task.Run(() => browser.GetAsync($"{query["redirect_uri"]}?code=the-code&state={Uri.EscapeDataString(query["state"]!)}"));
+                var state = query["state"] ?? throw new InvalidOperationException($"The login URL has no state: {loginUrl}");
+                _ = Task.Run(() => browser.GetAsync($"{query["redirect_uri"]}?code=the-code&state={Uri.EscapeDataString(state)}"));
                 return Task.CompletedTask;
             };
             window.Show();

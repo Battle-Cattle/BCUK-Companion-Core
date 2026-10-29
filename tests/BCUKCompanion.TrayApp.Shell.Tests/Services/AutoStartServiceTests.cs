@@ -18,9 +18,10 @@ public sealed class AutoStartServiceTests
 
         AutoStartService.SetEnabled(true);
         Assert.True(AutoStartService.IsEnabled());
-        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")!)
+        using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
         {
-            Assert.EndsWith("\" --minimized", (string)key.GetValue(folder.Name)!);
+            Assert.NotNull(key);
+            Assert.EndsWith("\" --minimized", Assert.IsType<string>(key.GetValue(folder.Name)));
         }
 
         AutoStartService.SetEnabled(false);

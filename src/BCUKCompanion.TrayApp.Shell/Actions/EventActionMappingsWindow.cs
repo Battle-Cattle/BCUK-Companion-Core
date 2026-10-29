@@ -244,6 +244,9 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     // tell it's been superseded and skip applying its (possibly stale) result out of order.
     private int _rewardTitleRefreshSequence;
 
+    /// <summary>The latest server suggestion fetch (completed when none has started); tests await it instead of sleeping.</summary>
+    internal Task PendingServerRefresh { get; private set; } = Task.CompletedTask;
+
     /// <summary>Refreshes <see cref="RewardTitleCombo"/>'s suggestions: names already mapped straight away, then the bot's live rewards or commands once they arrive.</summary>
     protected void RefreshRewardTitleSuggestions()
     {
@@ -259,7 +262,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         // local-only suggestion list above with the live reward (or command) catalog once it arrives.
         if (getCompanionClient?.Invoke() is { IsLoggedIn: true } client)
         {
-            _ = RefreshRewardTitleSuggestionsFromServerAsync(client, kind, sequence);
+            PendingServerRefresh = RefreshRewardTitleSuggestionsFromServerAsync(client, kind, sequence);
         }
     }
 

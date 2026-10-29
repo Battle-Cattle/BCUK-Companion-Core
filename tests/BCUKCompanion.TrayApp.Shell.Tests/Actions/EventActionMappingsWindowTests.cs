@@ -19,7 +19,7 @@ public sealed class EventActionMappingsWindowTests : IDisposable
 
     public void Dispose()
     {
-        var directory = Path.GetDirectoryName(store.ConfigFilePath)!;
+        var directory = Path.GetDirectoryName(store.ConfigFilePath) ?? throw new InvalidOperationException("The config file has no folder.");
         if (Directory.Exists(directory))
         {
             Directory.Delete(directory, recursive: true);
@@ -322,7 +322,7 @@ public sealed class EventActionMappingsWindowTests : IDisposable
     public void Suggestions_ComeFromTheBotOnceLoggedIn()
     {
         WindowsOnly.Skip();
-        var handler = new RouteHttpHandler(request => request.RequestUri!.AbsolutePath switch
+        var handler = new RouteHttpHandler(request => request.RequestUri?.AbsolutePath switch
         {
             "/api/companion/rewards" => RouteHttpHandler.Json(
                 """{"ok":true,"rewards":[{"id":"1","title":"Hydrate","isEnabled":true},{"id":"2","title":"Paused","isEnabled":false}]}"""),
@@ -358,8 +358,9 @@ public sealed class EventActionMappingsWindowTests : IDisposable
         {
             var window = new TestWindow(store, Config(Mapping("Mapped")), () => client);
 
-            await WpfTest.WaitUntil(() => !handler.Paths.IsEmpty);
-            await Task.Delay(100);
+            await window.PendingServerRefresh;
+
+            Assert.Single(handler.Paths);
             Assert.Equal(["Mapped"], (IEnumerable<string>)window.TitleCombo.ItemsSource);
         });
     }
@@ -379,12 +380,14 @@ public sealed class EventActionMappingsWindowTests : IDisposable
         WpfTest.Run(async () =>
         {
             var window = new TestWindow(store, Config(Mapping("Mapped")), () => loggedIn ? client : null);
+            var staleFetch = window.PendingServerRefresh;
 
             loggedIn = false;
             window.KindCombo.SelectedItem = EventActionTriggerKind.Command; // a newer, local-only refresh
             release.SetResult();
-            await Task.Delay(300);
+            await staleFetch;
 
+            Assert.Single(handler.Paths);
             Assert.Empty((IEnumerable<string>)window.TitleCombo.ItemsSource);
         });
     }

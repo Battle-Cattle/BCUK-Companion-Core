@@ -18,7 +18,7 @@ public sealed class TrayAppControllerTests : IDisposable
     private readonly TempAppFolder folder = new();
     private readonly ConcurrentQueue<string> messages = new();
     private readonly ConcurrentQueue<BotEventArgs> botEvents = new();
-    private readonly RouteHttpHandler bot = new(request => request.RequestUri!.AbsolutePath == "/api/companion/token/revoke"
+    private readonly RouteHttpHandler bot = new(request => request.RequestUri?.AbsolutePath == "/api/companion/token/revoke"
         ? RouteHttpHandler.Json("{}")
         : RouteHttpHandler.Json("{}", HttpStatusCode.ServiceUnavailable));
     private int shutdowns;
@@ -48,8 +48,11 @@ public sealed class TrayAppControllerTests : IDisposable
 
     private void SaveToken(string token) => new DpapiFileTokenStore(AppPaths.TokenFile).Save(token);
 
+    private static ToolStripItemCollection MenuItems(TrayAppController controller) =>
+        Assert.IsType<ContextMenuStrip>(controller.TrayIcon.NotifyIcon.ContextMenuStrip).Items;
+
     private static void Click(TrayAppController controller, string label) =>
-        controller.TrayIcon.NotifyIcon.ContextMenuStrip!.Items.Cast<ToolStripItem>().Single(i => i.Text == label).PerformClick();
+        MenuItems(controller).Cast<ToolStripItem>().Single(i => i.Text == label).PerformClick();
 
     private static string Balloon(TrayAppController controller) =>
         $"{controller.TrayIcon.NotifyIcon.BalloonTipTitle}: {controller.TrayIcon.NotifyIcon.BalloonTipText}";
@@ -86,13 +89,15 @@ public sealed class TrayAppControllerTests : IDisposable
 
             Assert.True(controller.Start());
 
-            Assert.True(controller.LoginWindow!.IsVisible);
+            Assert.NotNull(controller.LoginWindow);
+            Assert.True(controller.LoginWindow.IsVisible);
             Assert.Equal("Test Companion — Login", controller.LoginWindow.Title);
             Assert.Equal("Test Companion", controller.TrayIcon.NotifyIcon.Text);
             Assert.Same(controller.Client, readyClient);
             Assert.False(controller.Client.IsLoggedIn);
 
-            hostBalloon!("Host", "said hi");
+            Assert.NotNull(hostBalloon);
+            hostBalloon("Host", "said hi");
             Assert.Equal("Host: said hi", Balloon(controller));
 
             Assert.True(controller.ReportUnhandledError(new InvalidOperationException("boom")));
@@ -166,7 +171,7 @@ public sealed class TrayAppControllerTests : IDisposable
             Assert.Same(login, controller.LoginWindow);
 
             Click(controller, "Settings");
-            var settings = controller.SettingsWindow!;
+            var settings = Assert.IsType<BCUKCompanion.TrayApp.Views.SettingsWindow>(controller.SettingsWindow);
             Assert.True(settings.IsVisible);
             Assert.Equal("Test Companion — Settings", settings.Title);
             Click(controller, "Settings");
@@ -175,10 +180,11 @@ public sealed class TrayAppControllerTests : IDisposable
             Click(controller, "Broken");
             Assert.Equal("Broken failed: host window failed", Balloon(controller));
             Assert.Contains(
-                controller.TrayIcon.NotifyIcon.ContextMenuStrip!.Items.Cast<ToolStripItem>(), i => i.Text == "Check for updates...");
+                MenuItems(controller).Cast<ToolStripItem>(), i => i.Text == "Check for updates...");
 
             settings.Close();
-            login!.Close();
+            Assert.NotNull(login);
+            login.Close();
             Assert.Null(controller.SettingsWindow);
             Assert.Null(controller.LoginWindow);
 
@@ -200,7 +206,8 @@ public sealed class TrayAppControllerTests : IDisposable
             Assert.Null(controller.LoginWindow);
 
             controller.ShowSettingsWindow();
-            WpfTest.Click(controller.SettingsWindow!.LogOutButton);
+            Assert.NotNull(controller.SettingsWindow);
+            WpfTest.Click(controller.SettingsWindow.LogOutButton);
 
             await WpfTest.WaitUntil(() => controller.LoginWindow is not null);
             Assert.False(controller.Client.IsLoggedIn);
@@ -273,10 +280,12 @@ public sealed class TrayAppControllerTests : IDisposable
             controller.OnConnectionStateChanged(null, CompanionConnectionState.Connected);
             Assert.Equal("Test Companion — Connected", controller.TrayIcon.NotifyIcon.Text);
             controller.ShowSettingsWindow();
-            Assert.Equal("Status: connected", controller.SettingsWindow!.ConnectionStatusText.Text);
+            Assert.NotNull(controller.SettingsWindow);
+            Assert.Equal("Status: connected", controller.SettingsWindow.ConnectionStatusText.Text);
 
             // A rejected token that's already been replaced leaves the Login window alone.
-            controller.LoginWindow!.Close();
+            Assert.NotNull(controller.LoginWindow);
+            controller.LoginWindow.Close();
             controller.OnConnectionStateChanged(null, CompanionConnectionState.AuthenticationFailed);
             Assert.Null(controller.LoginWindow);
         });
@@ -355,7 +364,7 @@ public sealed class TrayAppControllerTests : IDisposable
     {
         WindowsOnly.Skip();
         SaveToken("token");
-        bot.Respond = request => request.RequestUri!.AbsolutePath == "/api/companion/token/revoke"
+        bot.Respond = request => request.RequestUri?.AbsolutePath == "/api/companion/token/revoke"
             ? RouteHttpHandler.Json("{}", HttpStatusCode.InternalServerError)
             : RouteHttpHandler.Json("{}", HttpStatusCode.ServiceUnavailable);
         WpfTest.Run(async () =>
@@ -365,7 +374,7 @@ public sealed class TrayAppControllerTests : IDisposable
             var oldClient = controller.Client;
             controller.ShowSettingsWindow();
             controller.ShowLoginWindow();
-            var login = controller.LoginWindow!;
+            var login = Assert.IsType<BCUKCompanion.TrayApp.Views.LoginWindow>(controller.LoginWindow);
 
             login.ServerHostBox.Text = "https://other.example";
             WpfTest.Click(login.ChangeServerButton);
@@ -395,7 +404,7 @@ public sealed class TrayAppControllerTests : IDisposable
             controller.Start();
             var oldClient = controller.Client;
             controller.ShowLoginWindow();
-            var login = controller.LoginWindow!;
+            var login = Assert.IsType<BCUKCompanion.TrayApp.Views.LoginWindow>(controller.LoginWindow);
 
             login.ServerHostBox.Text = "https://bot.example.com/companion";
             WpfTest.Click(login.ChangeServerButton);
