@@ -5,7 +5,6 @@ using BCUKCompanion.Core;
 using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
 using BCUKCompanion.Core.Tokens;
-using BCUKCompanion.Core.Updates;
 using BCUKCompanion.TrayApp.Services;
 using BCUKCompanion.TrayApp.Updates;
 using BCUKCompanion.TrayApp.Views;
@@ -67,34 +66,6 @@ internal sealed class TrayAppController : IDisposable
 
     /// <summary>The open settings window, if any.</summary>
     internal SettingsWindow? SettingsWindow => _settingsWindow;
-
-    /// <summary>
-    /// Deletes the loose files an older multi-file release left in the install folder. Only a
-    /// single-file build (no assembly location) may do this: a multi-file build, e.g. a
-    /// developer's, still needs those files. Best-effort; a failure is retried on the next launch.
-    /// </summary>
-    /// <param name="assemblyLocation">The Shell assembly's location; empty in a single-file build.</param>
-    /// <param name="processPath">The running exe's path, or null if unknown.</param>
-    /// <param name="baseDirectory">The install folder.</param>
-    /// <returns>True if the clean-up ran to completion; false if skipped or it failed.</returns>
-    internal static bool RemoveLegacyInstallFiles(string assemblyLocation, string? processPath, string baseDirectory)
-    {
-        if (!string.IsNullOrEmpty(assemblyLocation) || processPath is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            LegacyInstallCleanup.Run(baseDirectory, Path.GetFileNameWithoutExtension(processPath));
-            return true;
-        }
-        catch (Exception)
-        {
-            // Best-effort clean-up; it must never stop the app starting. Retried on the next launch.
-            return false;
-        }
-    }
 
     /// <summary>
     /// Takes the single-instance lock, loads the settings, creates the client, tray icon and

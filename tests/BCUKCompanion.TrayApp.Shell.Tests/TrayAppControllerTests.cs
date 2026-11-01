@@ -58,27 +58,6 @@ public sealed class TrayAppControllerTests : IDisposable
         $"{controller.TrayIcon.NotifyIcon.BalloonTipTitle}: {controller.TrayIcon.NotifyIcon.BalloonTipText}";
 
     [SkippableFact]
-    public void RemoveLegacyInstallFiles_OnlyRunsForASingleFileBuild()
-    {
-        WindowsOnly.Skip();
-        WpfTest.Run(() =>
-        {
-            var install = Directory.CreateTempSubdirectory("bcuk-install-");
-            try
-            {
-                Assert.False(TrayAppController.RemoveLegacyInstallFiles("C:\\app\\BCUKCompanion.TrayApp.Shell.dll", "C:\\app\\App.exe", install.FullName));
-                Assert.False(TrayAppController.RemoveLegacyInstallFiles("", null, install.FullName));
-                Assert.True(TrayAppController.RemoveLegacyInstallFiles("", Path.Combine(install.FullName, "App.exe"), install.FullName));
-                Assert.False(TrayAppController.RemoveLegacyInstallFiles("", "App.exe", "\0 not a path"));
-            }
-            finally
-            {
-                install.Delete(recursive: true);
-            }
-        });
-    }
-
-    [SkippableFact]
     public void Start_LoggedOut_ShowsTheLoginWindowAndTheTrayIcon()
     {
         WindowsOnly.Skip();

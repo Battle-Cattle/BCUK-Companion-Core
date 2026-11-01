@@ -27,11 +27,6 @@ public sealed class CompanionTrayApplication : System.Windows.Application
     /// <param name="options">The host app's identity, integrations and update settings; defaults suit a single companion app.</param>
     public static void Run(CompanionTrayAppOptions? options = null)
     {
-        // Releases are single-file builds, and the updater never deletes anything, so an install
-        // updated from an older multi-file release still holds that build's loose runtime files.
-        // Runs before WPF starts so none of them are loaded yet.
-        TrayAppController.RemoveLegacyInstallFiles(
-            typeof(CompanionTrayApplication).Assembly.Location, Environment.ProcessPath, AppContext.BaseDirectory);
         var app = new CompanionTrayApplication(options ?? new CompanionTrayAppOptions());
         ((System.Windows.Application)app).Run();
     }
