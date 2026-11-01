@@ -86,8 +86,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     /// not relaunched; restore-failed.log records why. If the app hasn't exited within WaitSeconds,
     /// nothing is touched. Exits 1 when it doesn't relaunch the app, 0 when it does.
     /// Files the new build no longer ships are left in place rather than mirroring, so nothing a
-    /// user dropped into the folder gets deleted; the leftovers of an older multi-file build are
-    /// removed by the new build itself on launch (LegacyInstallCleanup).
+    /// user dropped into the folder gets deleted.
     /// </summary>
     internal const string ApplyUpdateScript = """
         param(

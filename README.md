@@ -48,8 +48,8 @@ this repo.
 
    ```xml
    <ItemGroup>
-     <PackageReference Include="BCUKCompanion.Core" Version="0.12.0" />
-     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.11.0" />
+     <PackageReference Include="BCUKCompanion.Core" Version="0.19.0" />
+     <PackageReference Include="BCUKCompanion.TrayApp.Shell" Version="0.18.0" />
    </ItemGroup>
    ```
 
@@ -138,7 +138,7 @@ the standard status-text-plus-Save bar, and `RemoveActions(predicate)` strips
 actions from every mapping (e.g. those targeting a deleted device).
 
 Persist the config with a subclass of `EventActionConfigStore<TConfig>`;
-override `CreateWhenMissing()` to migrate an older install's settings, and
+override `CreateWhenMissing()` to seed a first run's config, and
 `OnLoaded(config)` to drop entries a hand-edited file left invalid.
 
 ### Self-updating from GitHub Releases

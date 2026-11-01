@@ -14,9 +14,6 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
 {
     private readonly JsonSerializerOptions serializerOptions;
 
-    // The app's data folder, which holds the config file (possibly in a subfolder) and any legacy files.
-    private readonly string dataFolderPath;
-
     // Load() (background dispatch thread) and Save() (UI thread) can be called concurrently;
     // this keeps the read and the temp-file-write-then-move fully serialized within this
     // process so neither observes the other's half-finished file state.
@@ -29,7 +26,7 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// <exception cref="ArgumentException"><paramref name="configFileName"/> is rooted or resolves outside the data folder.</exception>
     protected EventActionConfigStore(string dataFolderName, string configFileName, EventActionTypeRegistry registry)
     {
-        dataFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), dataFolderName);
+        var dataFolderPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), dataFolderName);
         ConfigFilePath = DataFolderPath.Resolve(dataFolderPath, configFileName, nameof(configFileName));
         serializerOptions = new JsonSerializerOptions
         {
@@ -59,17 +56,10 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
 
     /// <summary>
     /// Supplies the config when the file doesn't exist yet: a new <typeparamref name="TConfig"/>
-    /// by default. Override to migrate an older install's settings, calling <see cref="Save"/> to
-    /// persist the result so the migration runs at most once. Runs under the store's lock, which
-    /// <see cref="Save"/> may re-enter from here.
+    /// by default. Override to seed a first run with defaults. Runs under the store's lock, which
+    /// <see cref="Save"/> may re-enter from here; <see cref="OnLoaded"/> still runs on whatever
+    /// this returns.
     /// </summary>
-    /// <remarks>
-    /// To merge older config files, start a <see cref="BeginLegacyMigration"/>, read each file
-    /// with <see cref="LegacyConfigMigration.Read"/>, return a new <typeparamref name="TConfig"/>
-    /// when <see cref="LegacyConfigMigration.FoundAny"/> is false, and otherwise build the merged
-    /// config and <see cref="Save"/> it only if <see cref="LegacyConfigMigration.Succeeded"/>.
-    /// <see cref="OnLoaded"/> still runs on whatever this returns.
-    /// </remarks>
     /// <returns>The config to use in place of the missing file.</returns>
     protected virtual TConfig CreateWhenMissing() => new();
 
@@ -80,15 +70,6 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// <param name="config">The config just read from the file or supplied by <see cref="CreateWhenMissing"/>.</param>
     /// <returns>The config <see cref="Load"/> should return.</returns>
     protected virtual TConfig OnLoaded(TConfig config) => config;
-
-    /// <summary>
-    /// Starts reading an older install's config files from this store's data folder (even when the
-    /// config file itself is in a subfolder of it), with this
-    /// store's serializer options. Meant for <see cref="CreateWhenMissing"/>; see its remarks.
-    /// </summary>
-    /// <returns>A migration that reads legacy files and tracks whether it's safe to save the result.</returns>
-    protected LegacyConfigMigration BeginLegacyMigration() =>
-        new(dataFolderPath, serializerOptions);
 
     /// <summary>The folder holding the config file: the data folder, or a subfolder of it.</summary>
     private string ConfigFolderPath =>
