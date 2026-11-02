@@ -1,7 +1,4 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using BCUKCompanion.Core.Api;
 using BCUKCompanion.Core.Auth;
 using BCUKCompanion.Core.Events;
 using BCUKCompanion.Core.Models;
@@ -17,9 +14,11 @@ public sealed class CompanionClient : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
-    private readonly Uri _botHost;
     private readonly ITokenStore _tokenStore;
     private readonly LoopbackOAuthClient _oauthClient;
+
+    // The request/response API calls; this class's matching public methods forward to it.
+    private readonly CompanionApiClient _api;
 
     // Guards _eventLoopCts/_eventLoopTask. Only ever held across plain field
     // reads/writes -- never across an await or a wait on a task -- so it's
@@ -85,8 +84,8 @@ public sealed class CompanionClient : IDisposable
         _tokenStore = tokenStore;
         _ownsHttpClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient();
-        _botHost = botHost;
         _oauthClient = new LoopbackOAuthClient(_httpClient, botHost);
+        _api = new CompanionApiClient(_httpClient, botHost, tokenStore);
         Events = new CompanionEventStream(_httpClient, botHost);
     }
 
@@ -103,13 +102,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
-    public async Task<IReadOnlyList<Reward>> GetRewardsAsync(CancellationToken cancellationToken = default)
-    {
-        RewardsResponse parsed = await FetchAsync<RewardsResponse>(
-            "/api/companion/rewards", "Fetching rewards", cancellationToken).ConfigureAwait(false);
-
-        return (IReadOnlyList<Reward>?)parsed.Rewards ?? Array.Empty<Reward>();
-    }
+    public Task<IReadOnlyList<Reward>> GetRewardsAsync(CancellationToken cancellationToken = default)
+        => _api.GetRewardsAsync(cancellationToken);
 
     /// <summary>
     /// Fetches streamer activity events (follow/sub/resub/giftsub/raid — no redemptions)
@@ -122,13 +116,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
-    public async Task<IReadOnlyList<CompanionActivityEvent>> GetRecentActivityEventsAsync(CancellationToken cancellationToken = default)
-    {
-        RecentActivityResponse parsed = await FetchAsync<RecentActivityResponse>(
-            "/api/companion/events/recent", "Fetching recent activity", cancellationToken).ConfigureAwait(false);
-
-        return (IReadOnlyList<CompanionActivityEvent>?)parsed.Events ?? Array.Empty<CompanionActivityEvent>();
-    }
+    public Task<IReadOnlyList<CompanionActivityEvent>> GetRecentActivityEventsAsync(CancellationToken cancellationToken = default)
+        => _api.GetRecentActivityEventsAsync(cancellationToken);
 
     /// <summary>
     /// Fetches the streamer's advanced commands from GET /api/companion/commands — e.g. to
@@ -140,13 +129,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
-    public async Task<IReadOnlyList<AdvancedCommand>> GetAdvancedCommandsAsync(CancellationToken cancellationToken = default)
-    {
-        CommandsResponse parsed = await FetchAsync<CommandsResponse>(
-            "/api/companion/commands", "Fetching advanced commands", cancellationToken).ConfigureAwait(false);
-
-        return (IReadOnlyList<AdvancedCommand>?)parsed.Commands ?? Array.Empty<AdvancedCommand>();
-    }
+    public Task<IReadOnlyList<AdvancedCommand>> GetAdvancedCommandsAsync(CancellationToken cancellationToken = default)
+        => _api.GetAdvancedCommandsAsync(cancellationToken);
 
     /// <summary>
     /// Reports whether this app ran an <see cref="AdvancedCommandEvent"/>'s actions, via
@@ -161,12 +145,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
-    public async Task<bool> AckAdvancedCommandAsync(string eventId, bool ok, string? error = null, CancellationToken cancellationToken = default)
-    {
-        AckResponse parsed = await PostJsonAsync<AckResponse>(
-            "/api/companion/commands/ack", new { eventId, ok, error }, "Acknowledging command", cancellationToken).ConfigureAwait(false);
-        return parsed.Resolved;
-    }
+    public Task<bool> AckAdvancedCommandAsync(string eventId, bool ok, string? error = null, CancellationToken cancellationToken = default)
+        => _api.AckAdvancedCommandAsync(eventId, ok, error, cancellationToken);
 
     /// <summary>
     /// Reports whether this app ran the actions for a <see cref="RedemptionEvent"/> sent with
@@ -182,12 +162,8 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
-    public async Task<bool> AckRedemptionAsync(string redemptionId, bool ok, string? error = null, CancellationToken cancellationToken = default)
-    {
-        AckResponse parsed = await PostJsonAsync<AckResponse>(
-            "/api/companion/rewards/ack", new { eventId = redemptionId, ok, error }, "Acknowledging redemption", cancellationToken).ConfigureAwait(false);
-        return parsed.Resolved;
-    }
+    public Task<bool> AckRedemptionAsync(string redemptionId, bool ok, string? error = null, CancellationToken cancellationToken = default)
+        => _api.AckRedemptionAsync(redemptionId, ok, error, cancellationToken);
 
     /// <summary>
     /// Tells the bot this app is still running an <see cref="AdvancedCommandEvent"/>'s actions, via
@@ -202,7 +178,7 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status (including 404 from a bot that predates progress pings) or an unparseable body.</exception>
     public Task<bool> ReportCommandProgressAsync(string eventId, CancellationToken cancellationToken = default)
-        => ReportProgressAsync("/api/companion/commands/progress", eventId, "Reporting command progress", cancellationToken);
+        => _api.ReportCommandProgressAsync(eventId, cancellationToken);
 
     /// <summary>
     /// Tells the bot this app is still running the actions for a <see cref="RedemptionEvent"/> sent with
@@ -216,203 +192,7 @@ public sealed class CompanionClient : IDisposable
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status or an unparseable body.</exception>
     public Task<bool> ReportRedemptionProgressAsync(string redemptionId, CancellationToken cancellationToken = default)
-        => ReportProgressAsync("/api/companion/rewards/progress", redemptionId, "Reporting redemption progress", cancellationToken);
-
-    /// <summary>POSTs <c>{ eventId }</c> to a progress route and returns the bot's <c>extended</c> flag.</summary>
-    /// <param name="path">The bot's progress route, e.g. <c>/api/companion/commands/progress</c>.</param>
-    /// <param name="eventId">The ID of the event whose actions are still running.</param>
-    /// <param name="operationDescription">Names the request in error messages, e.g. "Reporting command progress".</param>
-    /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>A task whose result is true if the bot restarted its acknowledgement timeout; false if it's no longer waiting for the event.</returns>
-    private async Task<bool> ReportProgressAsync(string path, string eventId, string operationDescription, CancellationToken cancellationToken)
-    {
-        ProgressResponse parsed = await PostJsonAsync<ProgressResponse>(
-            path, new { eventId }, operationDescription, cancellationToken).ConfigureAwait(false);
-        return parsed.Extended;
-    }
-
-    /// <summary>
-    /// Sends an authenticated GET to a companion API path and deserializes the response body as
-    /// <typeparamref name="TResponse"/>. Shared by every simple request/response companion
-    /// endpoint (as opposed to <see cref="Events"/>, which is long-lived/streaming). Every
-    /// <typeparamref name="TResponse"/> carries an <see cref="IApiEnvelope.Ok"/>/
-    /// <see cref="IApiEnvelope.Error"/> envelope, checked here so an HTTP 200 the server marked
-    /// <c>ok: false</c> throws instead of silently looking like an empty/absent result.
-    /// </summary>
-    /// <param name="path">The companion API path, relative to the bot host.</param>
-    /// <param name="operationDescription">Names the request in error messages, e.g. "Fetching rewards".</param>
-    /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
-    /// <exception cref="InvalidOperationException">No companion token is saved.</exception>
-    /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
-    /// <exception cref="CompanionApiException">The server returned a non-success status, an unparseable body, or an <c>ok: false</c> envelope.</exception>
-    private Task<TResponse> FetchAsync<TResponse>(string path, string operationDescription, CancellationToken cancellationToken)
-        where TResponse : class, IApiEnvelope
-        => SendAsync<TResponse>(HttpMethod.Get, path, null, operationDescription, cancellationToken);
-
-    /// <summary>
-    /// Serializes <paramref name="body"/> to JSON and POSTs it to a companion API path, checking
-    /// the response envelope like <see cref="FetchAsync{TResponse}"/>.
-    /// </summary>
-    /// <typeparam name="TResponse">The response body's shape.</typeparam>
-    /// <param name="path">The companion API path, relative to the bot host.</param>
-    /// <param name="body">The request body; its property names become the JSON field names the bot reads.</param>
-    /// <param name="operationDescription">Names the request in error messages, e.g. "Acknowledging command".</param>
-    /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
-    private Task<TResponse> PostJsonAsync<TResponse>(string path, object body, string operationDescription, CancellationToken cancellationToken)
-        where TResponse : class, IApiEnvelope
-        => SendAsync<TResponse>(HttpMethod.Post, path, JsonSerializer.Serialize(body), operationDescription, cancellationToken);
-
-    /// <summary>
-    /// Sends an authenticated request (with an optional JSON body) to a companion API path and
-    /// checks its envelope — see <see cref="FetchAsync{TResponse}"/>.
-    /// </summary>
-    /// <param name="method">The HTTP method to send.</param>
-    /// <param name="path">The companion API path, relative to the bot host.</param>
-    /// <param name="jsonBody">The JSON request body, or null to send none.</param>
-    /// <param name="operationDescription">Names the request in error messages, e.g. "Acknowledging command".</param>
-    /// <param name="cancellationToken">Cancels the request.</param>
-    /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
-    private async Task<TResponse> SendAsync<TResponse>(
-        HttpMethod method, string path, string? jsonBody, string operationDescription, CancellationToken cancellationToken)
-        where TResponse : class, IApiEnvelope
-    {
-        string? token = _tokenStore.Load();
-        if (token is null)
-        {
-            throw new InvalidOperationException("No companion token saved — log in first.");
-        }
-
-        var requestUri = new Uri(_botHost, path);
-        using var request = new HttpRequestMessage(method, requestUri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (jsonBody is not null)
-        {
-            request.Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
-        }
-
-        using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-
-        if (response.StatusCode == HttpStatusCode.Unauthorized)
-        {
-            throw new CompanionAuthException(JsonHelpers.TryGetString(body, "error") ?? "The companion token was rejected — log in again.", (int)response.StatusCode);
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            string message = JsonHelpers.TryGetString(body, "error") ?? $"{operationDescription} failed with status {(int)response.StatusCode}.";
-            throw new CompanionApiException(message, (int)response.StatusCode);
-        }
-
-        TResponse? parsed;
-        try
-        {
-            parsed = JsonSerializer.Deserialize<TResponse>(body);
-        }
-        catch (JsonException)
-        {
-            throw new CompanionApiException($"{operationDescription} response was not valid JSON.", (int)response.StatusCode);
-        }
-
-        if (parsed is null || !parsed.Ok)
-        {
-            throw new CompanionApiException(parsed?.Error ?? $"{operationDescription} failed.", (int)response.StatusCode);
-        }
-
-        return parsed;
-    }
-
-    /// <summary>Common envelope shape (<c>{ ok, error, ... }</c>) every companion request/response API returns.</summary>
-    private interface IApiEnvelope
-    {
-        /// <summary>Whether the request succeeded.</summary>
-        bool Ok { get; }
-
-        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
-        string? Error { get; }
-    }
-
-    /// <summary>The response of GET /api/companion/events/recent.</summary>
-    private sealed class RecentActivityResponse : IApiEnvelope
-    {
-        /// <summary>Whether the request succeeded.</summary>
-        [JsonPropertyName("ok")]
-        public bool Ok { get; set; }
-
-        /// <summary>The missed activity events.</summary>
-        [JsonPropertyName("events")]
-        public List<CompanionActivityEvent>? Events { get; set; }
-
-        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
-        [JsonPropertyName("error")]
-        public string? Error { get; set; }
-    }
-
-    /// <summary>The response of GET /api/companion/rewards.</summary>
-    private sealed class RewardsResponse : IApiEnvelope
-    {
-        /// <summary>Whether the request succeeded.</summary>
-        [JsonPropertyName("ok")]
-        public bool Ok { get; set; }
-
-        /// <summary>The channel's custom rewards.</summary>
-        [JsonPropertyName("rewards")]
-        public List<Reward>? Rewards { get; set; }
-
-        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
-        [JsonPropertyName("error")]
-        public string? Error { get; set; }
-    }
-
-    /// <summary>The response of GET /api/companion/commands.</summary>
-    private sealed class CommandsResponse : IApiEnvelope
-    {
-        /// <summary>Whether the request succeeded.</summary>
-        [JsonPropertyName("ok")]
-        public bool Ok { get; set; }
-
-        /// <summary>The streamer's advanced commands.</summary>
-        [JsonPropertyName("commands")]
-        public List<AdvancedCommand>? Commands { get; set; }
-
-        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
-        [JsonPropertyName("error")]
-        public string? Error { get; set; }
-    }
-
-    /// <summary>The response of the command and redemption ack routes.</summary>
-    private sealed class AckResponse : IApiEnvelope
-    {
-        /// <summary>Whether the request succeeded.</summary>
-        [JsonPropertyName("ok")]
-        public bool Ok { get; set; }
-
-        /// <summary>Whether this acknowledgement resolved the event (false if the bot already had, e.g. on timeout).</summary>
-        [JsonPropertyName("resolved")]
-        public bool Resolved { get; set; }
-
-        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
-        [JsonPropertyName("error")]
-        public string? Error { get; set; }
-    }
-
-    /// <summary>The response of the command and redemption progress routes.</summary>
-    private sealed class ProgressResponse : IApiEnvelope
-    {
-        /// <summary>Whether the request succeeded.</summary>
-        [JsonPropertyName("ok")]
-        public bool Ok { get; set; }
-
-        /// <summary>Whether the bot restarted its acknowledgement timeout.</summary>
-        [JsonPropertyName("extended")]
-        public bool Extended { get; set; }
-
-        /// <summary>The bot's error message, when <see cref="Ok"/> is false.</summary>
-        [JsonPropertyName("error")]
-        public string? Error { get; set; }
-    }
+        => _api.ReportRedemptionProgressAsync(redemptionId, cancellationToken);
 
     /// <summary>Runs the loopback OAuth login flow (Option A) and saves the resulting token.</summary>
     /// <param name="openBrowser">Opens the given login URL in the user's browser.</param>
@@ -509,35 +289,8 @@ public sealed class CompanionClient : IDisposable
             Logout();
         }
 
-        return token is null ? Task.FromResult(LogoutResult.NoToken) : RevokeAsync(token, cancellationToken);
+        return token is null ? Task.FromResult(LogoutResult.NoToken) : _api.RevokeTokenAsync(token, cancellationToken);
     }
-
-    /// <summary>Asks the bot to revoke <paramref name="token"/>, giving up after <see cref="RevokeTimeout"/>.</summary>
-    /// <param name="token">The bearer token to revoke, sent as the request's own credentials.</param>
-    /// <param name="cancellationToken">Cancels the revoke request.</param>
-    /// <returns>A task whose result is <see cref="LogoutResult.Revoked"/> when the bot confirmed it (or answered 401), otherwise <see cref="LogoutResult.NotConfirmed"/>.</returns>
-    private async Task<LogoutResult> RevokeAsync(string token, CancellationToken cancellationToken)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(RevokeTimeout);
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(_botHost, "/api/companion/token/revoke"));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, timeoutCts.Token).ConfigureAwait(false);
-            // 401 means the bot doesn't know the token or already revoked it: either way it's dead.
-            return response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Unauthorized
-                ? LogoutResult.Revoked
-                : LogoutResult.NotConfirmed;
-        }
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
-        {
-            return LogoutResult.NotConfirmed;
-        }
-    }
-
-    /// <summary>How long <see cref="LogoutAsync"/> waits for the bot to revoke the token.</summary>
-    private static readonly TimeSpan RevokeTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Starts (or restarts) the background SSE listen loop using the saved
