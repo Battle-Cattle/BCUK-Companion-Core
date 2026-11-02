@@ -148,7 +148,7 @@ internal sealed class CompanionApiClient
     /// <summary>
     /// Sends an authenticated GET to a companion API path and deserializes the response body as
     /// <typeparamref name="TResponse"/>. Every <typeparamref name="TResponse"/> carries an
-    /// <see cref="IApiEnvelope.Ok"/>/<see cref="IApiEnvelope.Error"/> envelope, checked here so an
+    /// <see cref="ApiEnvelope.Ok"/>/<see cref="ApiEnvelope.Error"/> envelope, checked here so an
     /// HTTP 200 the server marked <c>ok: false</c> throws instead of silently looking like an
     /// empty/absent result.
     /// </summary>
@@ -161,7 +161,7 @@ internal sealed class CompanionApiClient
     /// <exception cref="CompanionAuthException">The saved token was rejected (401).</exception>
     /// <exception cref="CompanionApiException">The server returned a non-success status, an unparseable body, or an <c>ok: false</c> envelope.</exception>
     private Task<TResponse> FetchAsync<TResponse>(string path, string operationDescription, CancellationToken cancellationToken)
-        where TResponse : class, IApiEnvelope
+        where TResponse : ApiEnvelope
         => SendAsync<TResponse>(HttpMethod.Get, path, null, operationDescription, cancellationToken);
 
     /// <summary>
@@ -175,7 +175,7 @@ internal sealed class CompanionApiClient
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
     private Task<TResponse> PostJsonAsync<TResponse>(string path, object body, string operationDescription, CancellationToken cancellationToken)
-        where TResponse : class, IApiEnvelope
+        where TResponse : ApiEnvelope
         => SendAsync<TResponse>(HttpMethod.Post, path, JsonSerializer.Serialize(body), operationDescription, cancellationToken);
 
     /// <summary>
@@ -191,7 +191,7 @@ internal sealed class CompanionApiClient
     /// <returns>A task whose result is the parsed response, whose envelope has <c>ok: true</c>.</returns>
     private async Task<TResponse> SendAsync<TResponse>(
         HttpMethod method, string path, string? jsonBody, string operationDescription, CancellationToken cancellationToken)
-        where TResponse : class, IApiEnvelope
+        where TResponse : ApiEnvelope
     {
         string? token = _tokenStore.Load();
         if (token is null)
@@ -224,7 +224,7 @@ internal sealed class CompanionApiClient
     /// <exception cref="CompanionAuthException"><paramref name="statusCode"/> is 401.</exception>
     /// <exception cref="CompanionApiException">Any other non-success status, an unparseable body, or an <c>ok: false</c> envelope.</exception>
     internal static TResponse ParseResponse<TResponse>(HttpStatusCode statusCode, string body, string operationDescription)
-        where TResponse : class, IApiEnvelope
+        where TResponse : ApiEnvelope
     {
         if (statusCode == HttpStatusCode.Unauthorized)
         {
