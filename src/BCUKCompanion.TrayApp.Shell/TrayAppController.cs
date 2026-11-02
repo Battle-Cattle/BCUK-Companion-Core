@@ -1,4 +1,3 @@
-using System.IO;
 using System.Net.Http;
 using System.Windows.Threading;
 using BCUKCompanion.Core;
@@ -42,6 +41,7 @@ internal sealed class TrayAppController : IDisposable
     private CompanionClient _companionClient = null!; // set by Start(); null-checked in Dispose
     private TrayIconController _trayIcon = null!; // set by Start(); null-checked in ReportUnhandledError and Dispose
     private BotEventHandler _botEvents = null!; // set by Start()
+    private LastActivityEventIds _lastActivityEventIds = null!; // set by Start()
     private LoginWindow? _loginWindow;
     private SettingsWindow? _settingsWindow;
     private bool _isConnected;
@@ -90,6 +90,7 @@ internal sealed class TrayAppController : IDisposable
         }
 
         _settings = AppSettings.Load();
+        _lastActivityEventIds = new LastActivityEventIds(_settings);
         // Its balloons go through _trayIcon, which exists before any bot event can arrive.
         _botEvents = new BotEventHandler(
             _options, DispatcherScheduler.For(_environment.Dispatcher), (title, text) => _trayIcon.ShowBalloon(title, text));
@@ -238,14 +239,13 @@ internal sealed class TrayAppController : IDisposable
     /// <param name="newBotHost">The new bot URL; nothing changes if it equals the current one, ignoring case.</param>
     private void ApplyBotHostChange(string newBotHost)
     {
-        if (string.Equals(_botHost.OriginalString, newBotHost, StringComparison.OrdinalIgnoreCase))
+        if (BotHostChange.Compare(_botHost, newBotHost) is not { } change)
         {
             return;
         }
 
         var oldClient = _companionClient;
-        var newHost = new Uri(newBotHost);
-        bool sameServer = AppSettings.ActivityKey(newHost) == AppSettings.ActivityKey(_botHost);
+        bool sameServer = change.SameServer;
         bool keepListening = sameServer && oldClient.IsLoggedIn;
 
         // First, so a token file that can't be deleted throws before anything is detached and
@@ -266,10 +266,11 @@ internal sealed class TrayAppController : IDisposable
         }
         else
         {
-            _ = FinishOldServerLogoutAsync(oldClient, oldServerRevoke);
+            _ = LoginCleanup.FinishOldServerLogoutAsync(
+                oldClient, oldServerRevoke, text => _trayIcon.ShowBalloon(_options.DisplayName, text));
         }
 
-        _botHost = newHost;
+        _botHost = change.NewHost;
         _companionClient = CreateCompanionClient(_botHost);
         _loginWindow?.UpdateCompanionClient(_companionClient, newBotHost);
         _settingsWindow?.UpdateCompanionClient(_companionClient);
@@ -293,29 +294,6 @@ internal sealed class TrayAppController : IDisposable
     }
 
     /// <summary>
-    /// Waits for the old bot's revoke after a server change (a few seconds at most), says so if it
-    /// wasn't confirmed, then disposes the old client, which owns the connection the revoke uses.
-    /// </summary>
-    /// <param name="oldClient">The client for the old bot host, disposed once the revoke ends.</param>
-    /// <param name="revoke">The old client's logout, whose result says whether the old bot confirmed the revoke.</param>
-    /// <returns>A task that completes once the old client is disposed; it faults only if the revoke itself threw.</returns>
-    private async Task FinishOldServerLogoutAsync(CompanionClient oldClient, Task<LogoutResult> revoke)
-    {
-        try
-        {
-            if (await revoke.ConfigureAwait(true) == LogoutResult.NotConfirmed)
-            {
-                _trayIcon.ShowBalloon(_options.DisplayName,
-                    "Switched server, but the old server didn't confirm the old login was revoked, so a copy of it may still work there.");
-            }
-        }
-        finally
-        {
-            oldClient.Dispose();
-        }
-    }
-
-    /// <summary>
     /// Creates the client for <paramref name="botHost"/>, wires its events to the tray, and
     /// seeds its activity stream with the last activity id shown for that host.
     /// </summary>
@@ -335,14 +313,7 @@ internal sealed class TrayAppController : IDisposable
         // showed it, so seed the stream with the last id this app showed for this bot host. With
         // nothing saved yet (first run, or a new host), only record where the server is up to.
         string activityKey = AppSettings.ActivityKey(botHost);
-        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long lastActivityEventId) && lastActivityEventId > 0)
-        {
-            client.Events.LastActivityEventId = lastActivityEventId;
-        }
-        else
-        {
-            client.Events.BaselineOnFirstCatchUp = true;
-        }
+        _lastActivityEventIds.Seed(client.Events, activityKey);
         client.Events.LastActivityEventIdChanged += (_, id) =>
             _ = _environment.Dispatcher.InvokeAsync(() => SaveLastActivityEventId(activityKey, id));
 
@@ -385,22 +356,7 @@ internal sealed class TrayAppController : IDisposable
     /// </summary>
     /// <param name="activityKey">The bot host's key, from <see cref="AppSettings.ActivityKey"/>.</param>
     /// <param name="id">The newest activity event id shown; ignored unless it's above the saved one.</param>
-    internal void SaveLastActivityEventId(string activityKey, long id)
-    {
-        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long saved) && saved >= id)
-        {
-            return;
-        }
-
-        _settings.LastActivityEventIds[activityKey] = id;
-        try
-        {
-            _settings.Save();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-        }
-    }
+    internal void SaveLastActivityEventId(string activityKey, long id) => _lastActivityEventIds.Save(activityKey, id);
 
     /// <summary>Shows the connection state on the tray icon; a rejected token is discarded and the Login window opened.</summary>
     /// <param name="sender">The client's event stream (unused).</param>
@@ -428,22 +384,10 @@ internal sealed class TrayAppController : IDisposable
     /// </summary>
     private void OnAuthenticationFailed()
     {
-        try
+        if (LoginCleanup.DiscardRejectedLogin(_companionClient, text => _trayIcon.ShowBalloon(_options.DisplayName, text)))
         {
-            if (!_companionClient.DiscardRejectedToken())
-            {
-                return;
-            }
+            ShowLoginWindow();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
-        {
-            // Traced too, since the balloon is best-effort and may not show.
-            System.Diagnostics.Trace.TraceError("Couldn't discard the rejected login: {0}", ex);
-            _companionClient.StopListening();
-            _trayIcon.ShowBalloon(_options.DisplayName, $"Couldn't discard the rejected login: {ex.Message}");
-        }
-
-        ShowLoginWindow();
     }
 
     /// <summary>

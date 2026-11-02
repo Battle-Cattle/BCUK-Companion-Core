@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Controls;
 using BCUKCompanion.Core;
 using BCUKCompanion.Core.Actions;
-using BCUKCompanion.Core.Models;
 using Button = System.Windows.Controls.Button;
 using ComboBox = System.Windows.Controls.ComboBox;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
@@ -35,19 +34,13 @@ public interface IEventActionMappingsConfig
 /// </summary>
 public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig : IEventActionMappingsConfig, new()
 {
-    private readonly EventActionConfigStore<TConfig> configStore;
-    private readonly EventActionDispatcher dispatcher;
     private readonly EventActionMappingsEditor editor;
+    private readonly EventActionConfigSaver<TConfig> saver;
+    private readonly MappingTestRunner testRunner;
 
-    /// <summary>
-    /// Optional accessor for the shared <see cref="CompanionClient"/>, used to refresh the
-    /// reward title suggestions from the live Twitch reward list (GET /api/companion/rewards)
-    /// instead of only offering titles already used in saved mappings. A <c>Func</c> rather
-    /// than a captured instance because the tray app shell can swap out its
-    /// <see cref="CompanionClient"/> (e.g. on a bot-host change) after this window is created.
-    /// Null (the default) preserves the old local-only suggestion behavior.
-    /// </summary>
-    private readonly Func<CompanionClient?>? getCompanionClient;
+    // The reward title suggestions: names already mapped, then (when the window was given a
+    // client accessor) the live rewards or commands from the bot.
+    private readonly MappingNameSuggestions suggestions;
 
     /// <summary>The mappings being edited (the <see cref="EventActionMappingsEditor"/>'s list); saved by <see cref="BuildConfig"/> when the user clicks Save.</summary>
     protected readonly ObservableCollection<EventActionMapping> Mappings;
@@ -104,12 +97,14 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         TConfig config,
         Func<CompanionClient?>? getCompanionClient = null)
     {
-        this.configStore = configStore;
-        this.getCompanionClient = getCompanionClient;
         InitialConfig = config;
         editor = new EventActionMappingsEditor(config.Mappings);
         Mappings = editor.Mappings;
-        dispatcher = new EventActionDispatcher(() => BuildConfig().Mappings, BuildContext);
+        saver = new EventActionConfigSaver<TConfig>(configStore);
+        testRunner = new MappingTestRunner(new EventActionDispatcher(() => BuildConfig().Mappings, BuildContext), BuildContext);
+        // A Func rather than a captured client because the tray app shell can swap out its
+        // CompanionClient (e.g. on a bot-host change) after this window is created.
+        suggestions = new MappingNameSuggestions(editor, getCompanionClient);
 
         SaveButton.Click += async (_, _) => await OnSaveAsync().ConfigureAwait(true);
         ShowTestResults = (report, caption) => MessageBox.Show(this, report, caption);
@@ -240,86 +235,29 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         return splitPanel;
     }
 
-    // Bumped on every RefreshRewardTitleSuggestions() call so an in-flight server fetch can
-    // tell it's been superseded and skip applying its (possibly stale) result out of order.
-    private int _rewardTitleRefreshSequence;
-
     /// <summary>The latest server suggestion fetch (completed when none has started); tests await it instead of sleeping.</summary>
     internal Task PendingServerRefresh { get; private set; } = Task.CompletedTask;
 
     /// <summary>Refreshes <see cref="RewardTitleCombo"/>'s suggestions: names already mapped straight away, then the bot's live rewards or commands once they arrive.</summary>
     protected void RefreshRewardTitleSuggestions()
     {
-        // Increment unconditionally, even when there's no logged-in client below: otherwise a
-        // refresh that finds no client doesn't invalidate an earlier in-flight fetch, which can
-        // then still pass the sequence check and overwrite these (correct) local-only
-        // suggestions with its now-stale server result.
-        int sequence = ++_rewardTitleRefreshSequence;
-        var kind = SelectedKind;
-        RewardTitleCombo.ItemsSource = editor.MappedNames(kind).ToList();
-
-        // Best-effort enhancement: if we have a logged-in companion client, replace the
-        // local-only suggestion list above with the live reward (or command) catalog once it arrives.
-        if (getCompanionClient?.Invoke() is { IsLoggedIn: true } client)
+        Task? liveFetch = suggestions.Refresh(
+            SelectedKind,
+            names => RewardTitleCombo.ItemsSource = names,
+            ShowLiveSuggestions);
+        if (liveFetch is not null)
         {
-            PendingServerRefresh = RefreshRewardTitleSuggestionsFromServerAsync(client, kind, sequence);
+            PendingServerRefresh = liveFetch;
         }
     }
 
-    /// <summary>
-    /// Fetches the live names for <paramref name="kind"/>: enabled reward titles, or the
-    /// advanced commands that send events to this app.
-    /// </summary>
-    /// <param name="client">The logged-in client to query the bot with.</param>
-    /// <param name="kind">Whether to fetch reward titles or command names.</param>
-    /// <returns>A task that completes with the names; it faults if the bot can't be reached.</returns>
-    private static async Task<IEnumerable<string>> FetchNamesAsync(CompanionClient client, EventActionTriggerKind kind)
+    /// <summary>Shows the live suggestions, keeping whatever the user has typed in <see cref="RewardTitleCombo"/>.</summary>
+    /// <param name="titles">The merged live and already-mapped names.</param>
+    private void ShowLiveSuggestions(List<string> titles)
     {
-        if (kind == EventActionTriggerKind.Command)
-        {
-            IReadOnlyList<AdvancedCommand> commands = await client.GetAdvancedCommandsAsync().ConfigureAwait(true);
-            return commands.Where(c => c.CompanionEnabled).Select(c => c.Name);
-        }
-
-        IReadOnlyList<Reward> rewards = await client.GetRewardsAsync().ConfigureAwait(true);
-        return rewards.Where(r => r.IsEnabled).Select(r => r.Title);
-    }
-
-    /// <summary>
-    /// Replaces the title suggestions with the server's rewards or commands (per <paramref name="kind"/>) plus the
-    /// already-mapped names, unless the fetch fails or a newer refresh (<paramref name="sequence"/>) has started.
-    /// </summary>
-    /// <param name="client">The logged-in client to query the bot with.</param>
-    /// <param name="kind">Whether to fetch reward titles or command names.</param>
-    /// <param name="sequence">The refresh number this fetch belongs to; its result is dropped if a later refresh has started.</param>
-    /// <returns>A task that completes once the suggestions are applied or skipped; it never faults.</returns>
-    private async Task RefreshRewardTitleSuggestionsFromServerAsync(CompanionClient client, EventActionTriggerKind kind, int sequence)
-    {
-        IEnumerable<string> names;
-        try
-        {
-            names = await FetchNamesAsync(client, kind).ConfigureAwait(true);
-        }
-        catch (Exception)
-        {
-            // Server unreachable, token expired, etc. — the local-only suggestions set in
-            // RefreshRewardTitleSuggestions() above stand; there's no dedicated retry here
-            // since the user can always type a title that isn't in the list.
-            return;
-        }
-
-        if (sequence != _rewardTitleRefreshSequence)
-        {
-            // A newer refresh was started while this fetch was in flight — its result will
-            // apply instead, so don't overwrite it with this now-stale one.
-            return;
-        }
-
-        var titles = editor.MergeSuggestions(names, kind);
-
         // Preserve whatever the user has already typed: RewardTitleCombo is editable, and WPF
         // can clear its Text when a fresh ItemsSource assignment invalidates the current
-        // selection, which would silently drop a title typed while this async fetch was in
+        // selection, which would silently drop a title typed while the async fetch was in
         // flight.
         var typedTitle = RewardTitleCombo.Text;
         RewardTitleCombo.ItemsSource = titles;
@@ -442,36 +380,13 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         }
 
         StatusText.Text = "Testing...";
-
-        EventDispatchResult result;
-        string report;
-        try
+        MappingTestOutcome outcome = await testRunner.RunAsync(mapping).ConfigureAwait(true);
+        if (outcome.Report is not null)
         {
-            // Guards DispatchAsync, BuildContext(), and Describe() alike: this runs off an
-            // async void button-click handler, so any exception escaping here (BuildConfig()/
-            // BuildContext() run outside EventActionDispatcher's own per-action try/catch, and
-            // a subclass's Describe() override is equally unguarded) would otherwise crash the
-            // process instead of just failing this one test run.
-            result = await dispatcher.DispatchAsync(mapping.RewardTitle, mapping.TriggerKind).ConfigureAwait(true);
-
-            if (result.ActionResults.Count == 0)
-            {
-                StatusText.Text = "Test did not dispatch any actions.";
-                return;
-            }
-
-            var context = BuildContext();
-            report = string.Join("\n", result.ActionResults.Select(r =>
-                $"{r.Action.Describe(context)}: {(r.Success ? "OK" : r.ErrorMessage ?? "Failed")}"));
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"Test failed: {ex.Message}";
-            return;
+            ShowTestResults(outcome.Report, outcome.Caption ?? string.Empty);
         }
 
-        ShowTestResults(report, $"Test results: {result.RewardTitle}");
-        StatusText.Text = result.AllSucceeded ? "Test succeeded." : "Test completed with errors.";
+        StatusText.Text = outcome.Status;
     }
 
     /// <summary>Replaces a mapping's actions (mappings are immutable records), keeping it selected if it was.</summary>
@@ -535,13 +450,7 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
         StatusText.Text = "Saving...";
         try
         {
-            var config = BuildConfig();
-            await Task.Run(() => configStore.Save(config)).ConfigureAwait(true);
-            StatusText.Text = $"Saved to {configStore.ConfigFilePath}";
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"Save failed: {ex.Message}";
+            StatusText.Text = await saver.SaveAsync(BuildConfig).ConfigureAwait(true);
         }
         finally
         {
