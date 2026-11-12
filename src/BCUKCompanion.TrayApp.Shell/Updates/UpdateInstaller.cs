@@ -11,6 +11,8 @@ namespace BCUKCompanion.TrayApp.Updates;
 /// PowerShell script waits for this process to exit, copies the new files over the install folder
 /// and relaunches the app. No WPF dependency: <see cref="CompanionUpdater"/> owns all prompts, through <see cref="IUpdateUi"/>.
 /// </summary>
+/// <param name="checker">The release checker used to download the update package.</param>
+/// <param name="dataFolderName">The app's data folder name, used to name the temp folder the update is extracted into.</param>
 internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string dataFolderName)
 {
     /// <summary>Starts the swap script's process; tests replace it to check what would run.</summary>

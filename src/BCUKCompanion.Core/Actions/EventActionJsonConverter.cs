@@ -13,6 +13,7 @@ namespace BCUKCompanion.Core.Actions;
 /// kind, or a value the action type rejects) becomes an <see cref="UnrecognizedEventAction"/>
 /// instead of failing the whole document.
 /// </summary>
+/// <param name="registry">The registry that maps each "kind" discriminator to its action type.</param>
 public sealed class EventActionJsonConverter(EventActionTypeRegistry registry) : JsonConverter<IEventAction>
 {
     private const string KindPropertyName = "kind";

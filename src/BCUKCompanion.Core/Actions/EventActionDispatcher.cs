@@ -8,6 +8,8 @@ namespace BCUKCompanion.Core.Actions;
 /// does — apps contribute their own kinds (see <see cref="EventActionTypeRegistry"/>) and supply
 /// whatever those kinds need via <see cref="IEventActionContext"/>.
 /// </summary>
+/// <param name="mappingsProvider">Supplies the current event-to-action mappings each time an event is dispatched.</param>
+/// <param name="contextProvider">Supplies the context actions use to resolve the services they need.</param>
 public sealed class EventActionDispatcher(
     Func<IReadOnlyList<EventActionMapping>> mappingsProvider,
     Func<IEventActionContext> contextProvider)
