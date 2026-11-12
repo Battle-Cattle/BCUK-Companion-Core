@@ -7,6 +7,8 @@ namespace BCUKCompanion.Core.Actions;
 /// app's own context — so an action can read event details, such as an advanced command's
 /// <c>param.&lt;key&gt;</c> metadata, with <c>context.GetService&lt;BotEventArgs&gt;()</c>.
 /// </summary>
+/// <param name="botEvent">The event being dispatched, returned when an action asks for <see cref="BotEventArgs"/>.</param>
+/// <param name="inner">The app's own context, consulted for every other service type.</param>
 public sealed class BotEventActionContext(BotEventArgs botEvent, IEventActionContext inner) : IEventActionContext
 {
     /// <summary>Returns the dispatched <see cref="BotEventArgs"/> when asked for it; otherwise defers to the app's context.</summary>

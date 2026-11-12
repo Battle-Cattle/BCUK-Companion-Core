@@ -7,6 +7,7 @@ namespace BCUKCompanion.Core.Actions;
 /// integration's action types knowing about the others. Lives in Core so an app with more than one
 /// integration doesn't have to write this chaining itself.
 /// </summary>
+/// <param name="contexts">The contexts to combine, consulted in order until one supplies the requested service.</param>
 public sealed class CompositeEventActionContext(params IEventActionContext[] contexts) : IEventActionContext
 {
     /// <summary>Returns the first service any of the combined contexts provides for <paramref name="serviceType"/>, in the order they were given.</summary>

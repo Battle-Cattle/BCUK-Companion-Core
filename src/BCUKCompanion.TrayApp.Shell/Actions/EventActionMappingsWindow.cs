@@ -78,6 +78,8 @@ public abstract class EventActionMappingsWindow<TConfig> : Window where TConfig 
     protected TConfig InitialConfig { get; }
 
     /// <summary>One row of <see cref="ActionsList"/>: an action and its description.</summary>
+    /// <param name="action">The action the row shows.</param>
+    /// <param name="display">The description shown for the action in the list.</param>
     private sealed class ActionListItem(IEventAction action, string display)
     {
         /// <summary>The action the row shows.</summary>
