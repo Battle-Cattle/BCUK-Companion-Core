@@ -82,7 +82,7 @@ public sealed class UpdateInstallerTests : IDisposable
         try
         {
             var ex = await Assert.ThrowsAsync<InvalidDataException>(
-                () => new UpdateInstaller(checker, dataFolderName).PrepareAndLaunchAsync(update));
+                () => new UpdateInstaller(checker, dataFolderName, "result.json").PrepareAndLaunchAsync(update));
 
             Assert.Equal($"The downloaded update doesn't contain {Path.GetFileName(Environment.ProcessPath)}.", ex.Message);
             string staged = Assert.Single(Directory.GetFiles(workRoot, "OtherApp.exe", SearchOption.AllDirectories));
@@ -118,7 +118,7 @@ public sealed class UpdateInstallerTests : IDisposable
 
         try
         {
-            await new UpdateInstaller(checker, dataFolderName) { StartProcess = info => started = info }.PrepareAndLaunchAsync(update);
+            await new UpdateInstaller(checker, dataFolderName, @"C:\data\update-result.json") { StartProcess = info => started = info }.PrepareAndLaunchAsync(update);
 
             Assert.NotNull(started);
             Assert.Equal("powershell.exe", started.FileName);
@@ -128,6 +128,8 @@ public sealed class UpdateInstallerTests : IDisposable
             Assert.Equal(UpdateInstaller.ApplyUpdateScript, File.ReadAllText(script));
             Assert.Equal(Environment.ProcessId.ToString(), args[args.IndexOf("-ProcessId") + 1]);
             Assert.Equal("new", File.ReadAllText(Path.Combine(args[args.IndexOf("-Source") + 1], exeName)));
+            Assert.Equal("1.1.0", args[args.IndexOf("-Version") + 1]);
+            Assert.Equal(@"C:\data\update-result.json", args[args.IndexOf("-ResultFile") + 1]);
         }
         finally
         {
@@ -157,7 +159,7 @@ public sealed class UpdateInstallerTests : IDisposable
     {
         string paramBlock = UpdateInstaller.ApplyUpdateScript[..UpdateInstaller.ApplyUpdateScript.IndexOf(')')];
         var declared = Regex.Matches(paramBlock, @"\$(\w+)").Select(m => "-" + m.Groups[1].Value).ToHashSet();
-        var request = new ApplyUpdateRequest(1, "s", "t", "e", "w");
+        var request = new ApplyUpdateRequest(1, "s", "t", "e", "w", "1.2.0", "r.json");
 
         var passed = request.ToScriptArguments().Where((_, i) => i % 2 == 0).ToList();
 

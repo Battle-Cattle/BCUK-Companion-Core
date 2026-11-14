@@ -110,6 +110,7 @@ internal sealed class TrayAppController : IDisposable
         _trayIcon = CreateTrayIcon(updater);
         InvokeOnTrayIconReady(showBalloon);
 
+        updater?.ReportLastAttempt();
         if (_options.Updates?.CheckOnLaunch == true)
         {
             updater?.CheckOnLaunch();

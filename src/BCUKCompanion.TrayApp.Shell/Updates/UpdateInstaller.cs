@@ -13,7 +13,8 @@ namespace BCUKCompanion.TrayApp.Updates;
 /// </summary>
 /// <param name="checker">The release checker used to download the update package.</param>
 /// <param name="dataFolderName">The app's data folder name, used to name the temp folder the update is extracted into.</param>
-internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string dataFolderName)
+/// <param name="resultFile">Where the swap script records how it went, for the next launch to read (see <see cref="UpdateAttemptLog"/>).</param>
+internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string dataFolderName, string resultFile)
 {
     /// <summary>Starts the swap script's process; tests replace it to check what would run.</summary>
     internal Action<ProcessStartInfo> StartProcess { get; init; } = startInfo => Process.Start(startInfo)?.Dispose();
@@ -57,7 +58,8 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             CreateNoWindow = true,
         };
         foreach (string arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", scriptPath }
-            .Concat(new ApplyUpdateRequest(Environment.ProcessId, stagingDir, installDir, exePath, workDir).ToScriptArguments()))
+            .Concat(new ApplyUpdateRequest(
+                Environment.ProcessId, stagingDir, installDir, exePath, workDir, update.Version.ToString(3), resultFile).ToScriptArguments()))
         {
             startInfo.ArgumentList.Add(arg);
         }
@@ -97,9 +99,21 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             [string]$Target,
             [string]$Exe,
             [string]$WorkDir,
+            [string]$Version = '',
+            [string]$ResultFile = '',
             [int]$WaitSeconds = 60
         )
         $ErrorActionPreference = 'Stop'
+
+        # Best-effort, like Write-Log: tells the app's next launch how this run went.
+        function Write-Result([string]$Outcome) {
+            if (-not $ResultFile) { return }
+            try {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $ResultFile) -Force | Out-Null
+                @{ version = $Version; outcome = $Outcome; workDir = $WorkDir; reported = $false } |
+                    ConvertTo-Json | Out-File -FilePath $ResultFile -Encoding utf8 -Force
+            } catch { }
+        }
 
         function Copy-Tree([string]$From, [string]$To) {
             for ($attempt = 1; $attempt -le 10; $attempt++) {
@@ -120,6 +134,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
 
         try { Wait-Process -Id $ProcessId -Timeout $WaitSeconds } catch { }
         if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+            Write-Result 'notExited'
             exit 1
         }
 
@@ -142,8 +157,11 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
         }
 
         if (-not $updated -and -not $restored) {
+            Write-Result 'failed'
             exit 1
         }
+
+        if ($updated) { Write-Result 'installed' } else { Write-Result 'restored' }
 
         Start-Process -FilePath $Exe -WorkingDirectory $Target
         if ($updated) {
