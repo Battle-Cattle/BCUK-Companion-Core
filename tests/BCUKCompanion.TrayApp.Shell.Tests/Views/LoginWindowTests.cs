@@ -1,3 +1,4 @@
+using System.Windows;
 using BCUKCompanion.Core;
 using BCUKCompanion.Core.Tokens;
 using BCUKCompanion.TrayApp.Views;
@@ -166,6 +167,50 @@ public sealed class LoginWindowTests
 
             Assert.Equal("Login failed: no browser", window.StatusText.Text);
             Assert.True(window.SaveTokenButton.IsEnabled);
+        });
+    }
+
+    [SkippableFact]
+    public void LoginWithBrowser_Cancel_StopsWaitingAndReenablesTheForm()
+    {
+        WindowsOnly.Skip();
+        using var client = Client();
+        WpfTest.Run(async () =>
+        {
+            // The browser never calls back, so only Cancel ends the attempt.
+            var window = new LoginWindow(client, BotHost) { OpenBrowser = _ => Task.CompletedTask };
+            Assert.Equal(Visibility.Collapsed, window.CancelLoginButton.Visibility);
+
+            WpfTest.Click(window.LoginWithBrowserButton);
+            Assert.Equal(Visibility.Visible, window.CancelLoginButton.Visibility);
+            Assert.False(window.SaveTokenButton.IsEnabled);
+
+            WpfTest.Click(window.CancelLoginButton);
+            await WpfTest.WaitUntil(() => window.LoginWithBrowserButton.IsEnabled);
+
+            Assert.Equal("Login cancelled.", window.StatusText.Text);
+            Assert.True(window.SaveTokenButton.IsEnabled);
+            Assert.Equal(Visibility.Collapsed, window.CancelLoginButton.Visibility);
+        });
+    }
+
+    [SkippableFact]
+    public void LoginWithBrowser_ClosingTheWindow_CancelsTheAttempt()
+    {
+        WindowsOnly.Skip();
+        using var client = Client();
+        WpfTest.Run(async () =>
+        {
+            var window = new LoginWindow(client, BotHost) { OpenBrowser = _ => Task.CompletedTask, ShowActivated = false };
+            var succeeded = 0;
+            window.LoginSucceeded += (_, _) => succeeded++;
+            window.Show();
+
+            WpfTest.Click(window.LoginWithBrowserButton);
+            window.Close();
+            await WpfTest.WaitUntil(() => window.StatusText.Text == "Login cancelled.");
+
+            Assert.Equal(0, succeeded);
         });
     }
 
