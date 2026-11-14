@@ -209,6 +209,29 @@ public sealed class BotEventHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task AQueuedCommandTheBotStopsWaitingFor_IsSkippedAndAcknowledgedAsFailed()
+    {
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+        });
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        handler.OnAdvancedCommand(client, Command());
+        clock.Advance(AckProgressPinger.DefaultInterval);
+        await WaitForAsync(() => http.Requests.Any(r => r.Path == "/api/companion/commands/progress"));
+        gated.FinishOldest();
+        await DrainAsync();
+
+        var ack = Assert.Single(http.Requests, r => r.Path == "/api/companion/commands/ack");
+        Assert.Equal("c-1", ack.Body!.Value.GetProperty("eventId").GetString());
+        Assert.False(ack.Body.Value.GetProperty("ok").GetBoolean());
+        Assert.Contains(balloons, b => b.Title == "Skipped Hydrate");
+    }
+
+    [Fact]
     public async Task AQueuedEventWhosePingsKeepFailing_IsSkippedOnceTheBotWouldHaveTimedItOut()
     {
         var failing = new RecordingHttpHandler(System.Net.HttpStatusCode.ServiceUnavailable, "{}");
