@@ -37,15 +37,18 @@ internal sealed class AckExpiry
 
     /// <summary>Wraps a progress ping so that its answer also feeds <see cref="Expired"/>.</summary>
     /// <param name="ping">Sends one progress ping; true while the bot is still waiting for the event.</param>
-    /// <returns>The same ping, which records a confirmation when the bot extends the timeout and a rejection when it answers false.</returns>
+    /// <returns>The same ping, which records a confirmation (as of when it was sent) when the bot extends the timeout, and a rejection when it answers false.</returns>
     public Func<CancellationToken, Task<bool>> Watch(Func<CancellationToken, Task<bool>> ping) => async cancellationToken =>
     {
         // Failures (including a 404 from a bot without progress pings) record nothing: the event
         // then expires once UnconfirmedLimit passes, as the bot's own timeout would.
+        // The bot restarts its timeout when the ping reaches it, so count from when it was sent:
+        // a slow response must not make the event look confirmed later than it was.
+        long sentAt = _timeProvider.GetTimestamp();
         bool extended = await ping(cancellationToken).ConfigureAwait(false);
         if (extended)
         {
-            Interlocked.Exchange(ref _confirmedAt, _timeProvider.GetTimestamp());
+            Interlocked.Exchange(ref _confirmedAt, sentAt);
         }
         else
         {

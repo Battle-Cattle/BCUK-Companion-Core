@@ -53,4 +53,22 @@ public sealed class AckExpiryTests
         clock.Advance(AckExpiry.UnconfirmedLimit - TimeSpan.FromMinutes(1));
         Assert.True(expiry.Expired);
     }
+
+    [Fact]
+    public async Task ASlowConfirmation_CountsFromWhenThePingWasSent()
+    {
+        var expiry = new AckExpiry(clock);
+        var slowConfirm = expiry.Watch(_ =>
+        {
+            clock.Advance(TimeSpan.FromSeconds(40)); // The response takes 40s to arrive.
+            return Task.FromResult(true);
+        });
+        var failing = expiry.Watch(_ => throw new CompanionApiException("down", 503));
+
+        Assert.True(await slowConfirm(CancellationToken.None));
+        await Assert.ThrowsAsync<CompanionApiException>(() => failing(CancellationToken.None));
+
+        clock.Advance(AckExpiry.UnconfirmedLimit - TimeSpan.FromSeconds(40));
+        Assert.True(expiry.Expired);
+    }
 }
