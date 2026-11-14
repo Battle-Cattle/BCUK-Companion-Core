@@ -29,6 +29,32 @@ public class CompanionEventStreamTests
     }
 
     [Fact]
+    public async Task AThrowingSubscriber_IsReportedWithoutStoppingTheStreamOrLaterSubscribers()
+    {
+        const string sse = """
+            data: {"type":"channel_points_redemption","rewardId":"r1","rewardTitle":"Hydrate!","userLogin":"u","userName":"U","userInput":"","redeemedAt":"2026-01-01T00:00:00Z"}
+
+            """;
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"));
+
+        var failures = new List<Exception>();
+        stream.SubscriberFailed += (_, ex) => failures.Add(ex);
+        stream.SubscriberFailed += (_, _) => throw new InvalidOperationException("reporting failed too");
+        stream.ConnectionStateChanged += (_, _) => throw new InvalidOperationException("state handler");
+        stream.RedemptionReceived += (_, _) => throw new InvalidOperationException("redemption handler");
+        RedemptionEvent? received = null;
+        stream.RedemptionReceived += (_, e) => received = e;
+
+        // Its own ConnectionStateChanged subscriber, added after the throwing one, still sees Disconnected.
+        await RunUntilDisconnectedAsync(stream);
+
+        Assert.Equal("Hydrate!", received?.RewardTitle);
+        Assert.Contains(failures, ex => ex.Message == "redemption handler");
+        Assert.Contains(failures, ex => ex.Message == "state handler");
+    }
+
+    [Fact]
     public async Task RaisesActivityReceivedForFollowPayload()
     {
         const string sse = """

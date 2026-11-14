@@ -65,6 +65,14 @@ public sealed class CompanionEventStream
     public event EventHandler<CompanionConnectionState>? ConnectionStateChanged;
 
     /// <summary>
+    /// Raised when a subscriber to one of this stream's other events throws. The stream catches
+    /// the exception so one faulty subscriber can't disconnect it or stop the subscribers after
+    /// it, and reports it here instead. An exception thrown by this event's own subscribers is
+    /// only traced.
+    /// </summary>
+    public event EventHandler<Exception>? SubscriberFailed;
+
+    /// <summary>
     /// Raised with the new value whenever <see cref="LastActivityEventId"/> advances, so a host can
     /// persist it and seed the next run with it (see <see cref="LastActivityEventId"/>).
     /// </summary>
@@ -113,7 +121,7 @@ public sealed class CompanionEventStream
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connecting);
+            Raise(ConnectionStateChanged, CompanionConnectionState.Connecting);
 
             (bool shouldStop, bool stayedConnected) = await ConnectOnceAsync(token, cancellationToken).ConfigureAwait(false);
             if (shouldStop)
@@ -121,7 +129,7 @@ public sealed class CompanionEventStream
                 return;
             }
 
-            ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Disconnected);
+            Raise(ConnectionStateChanged, CompanionConnectionState.Disconnected);
 
             if (stayedConnected)
             {
@@ -182,13 +190,13 @@ public sealed class CompanionEventStream
         {
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                ConnectionStateChanged?.Invoke(this, CompanionConnectionState.AuthenticationFailed);
+                Raise(ConnectionStateChanged, CompanionConnectionState.AuthenticationFailed);
                 return (ShouldStop: true, StayedConnected: false);
             }
 
             if (response.StatusCode == (HttpStatusCode)429)
             {
-                ConnectionStateChanged?.Invoke(this, CompanionConnectionState.RateLimited);
+                Raise(ConnectionStateChanged, CompanionConnectionState.RateLimited);
                 return (ShouldStop: false, StayedConnected: false);
             }
 
@@ -197,7 +205,7 @@ public sealed class CompanionEventStream
                 return (ShouldStop: false, StayedConnected: false);
             }
 
-            ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connected);
+            Raise(ConnectionStateChanged, CompanionConnectionState.Connected);
             ResetIdleTimer(idleCts, IdleTimeout);
             long connectedAt = TimeProvider.GetTimestamp();
 
@@ -238,6 +246,21 @@ public sealed class CompanionEventStream
 
             return (ShouldStop: false, StayedConnected: TimeProvider.GetElapsedTime(connectedAt) >= StableConnectionTime);
         }
+    }
+
+    /// <summary>Raises <paramref name="handler"/>, reporting a subscriber that throws through <see cref="SubscriberFailed"/> rather than letting it end the listen loop.</summary>
+    /// <typeparam name="T">The event's argument type.</typeparam>
+    /// <param name="handler">The event to raise.</param>
+    /// <param name="args">The event's argument.</param>
+    private void Raise<T>(EventHandler<T>? handler, T args) =>
+        SubscriberInvoker.Raise(handler, this, args, ReportSubscriberFailure);
+
+    /// <summary>Raises <see cref="SubscriberFailed"/> for <paramref name="failure"/>, and traces it.</summary>
+    /// <param name="failure">The exception a subscriber threw.</param>
+    private void ReportSubscriberFailure(Exception failure)
+    {
+        System.Diagnostics.Trace.TraceError("A companion event subscriber threw: {0}", failure);
+        SubscriberInvoker.Raise(SubscriberFailed, this, failure, ex => System.Diagnostics.Trace.TraceError("A SubscriberFailed subscriber threw: {0}", ex));
     }
 
     /// <summary>Restarts the idle countdown after the stream received something, ignoring a stream already torn down.</summary>
@@ -303,7 +326,7 @@ public sealed class CompanionEventStream
             if (valid.Count > 0 && MarkSeen(valid[^1]))
             {
                 // No activity to dispatch here, so the host only hears about the new mark.
-                LastActivityEventIdChanged?.Invoke(this, valid[^1].Id);
+                Raise(LastActivityEventIdChanged, valid[^1].Id);
             }
             return;
         }
@@ -420,8 +443,8 @@ public sealed class CompanionEventStream
     /// <param name="activity">The newly seen activity.</param>
     private void DispatchActivity(CompanionActivityEvent activity)
     {
-        ActivityReceived?.Invoke(this, activity);
-        LastActivityEventIdChanged?.Invoke(this, activity.Id);
+        Raise(ActivityReceived, activity);
+        Raise(LastActivityEventIdChanged, activity.Id);
     }
 
     /// <summary>Parses a channel-point redemption frame and raises <see cref="RedemptionReceived"/> if it's complete.</summary>
@@ -430,7 +453,7 @@ public sealed class CompanionEventStream
     {
         if (EventJson.TryDeserialize(data, out RedemptionEvent? redemption) && IsComplete(redemption))
         {
-            RedemptionReceived?.Invoke(this, redemption);
+            Raise(RedemptionReceived, redemption);
         }
     }
 
@@ -440,7 +463,7 @@ public sealed class CompanionEventStream
     {
         if (EventJson.TryDeserialize(data, out AdvancedCommandEvent? command) && IsComplete(command) && MarkCommandSeen(command.Id))
         {
-            AdvancedCommandReceived?.Invoke(this, command);
+            Raise(AdvancedCommandReceived, command);
         }
     }
 

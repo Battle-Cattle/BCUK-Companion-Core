@@ -289,6 +289,22 @@ public sealed class TrayAppControllerTests : IDisposable
     }
 
     [SkippableFact]
+    public void AFailingEventSubscriber_IsReportedAsABalloon()
+    {
+        WindowsOnly.Skip();
+        WpfTest.Run(async () =>
+        {
+            using var controller = Controller();
+            controller.Start();
+
+            controller.OnSubscriberFailed(null, new InvalidOperationException("handler broke"));
+            await Dispatcher.Yield(DispatcherPriority.Background);
+
+            Assert.Equal("Test Companion hit an error: handler broke", Balloon(controller));
+        });
+    }
+
+    [SkippableFact]
     public void BotEvents_ReachTheHost()
     {
         WindowsOnly.Skip();

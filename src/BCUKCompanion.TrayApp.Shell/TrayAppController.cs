@@ -15,11 +15,13 @@ namespace BCUKCompanion.TrayApp;
 /// <param name="Shutdown">Ends the application.</param>
 /// <param name="ShowMessage">Shows a message box, given its text and caption.</param>
 /// <param name="HttpHandler">Sends the companion client's requests; null for the real network.</param>
+/// <param name="Clock">Times the delay before restarting a faulted listen loop; null for the system clock.</param>
 internal sealed record TrayAppEnvironment(
     Dispatcher Dispatcher,
     Action Shutdown,
     Action<string, string> ShowMessage,
-    HttpMessageHandler? HttpHandler = null);
+    HttpMessageHandler? HttpHandler = null,
+    TimeProvider? Clock = null);
 
 /// <summary>
 /// Everything the tray app does once WPF has started: the single-instance guard, settings,
@@ -31,6 +33,7 @@ internal sealed class TrayAppController : IDisposable
 {
     private readonly CompanionTrayAppOptions _options;
     private readonly TrayAppEnvironment _environment;
+    private readonly ListenLoopRestarter _loopRestarter;
     private Mutex? _singleInstanceMutex;
     // Start() assigns these before anything that reads them can run: the tray menu, the windows
     // and the client's event handlers all start from Start(). A Start() that loses the single-instance
@@ -53,6 +56,7 @@ internal sealed class TrayAppController : IDisposable
     {
         _options = options;
         _environment = environment;
+        _loopRestarter = new ListenLoopRestarter(environment.Clock ?? TimeProvider.System);
     }
 
     /// <summary>The tray icon; read it only after <see cref="Start"/> has returned true.</summary>
@@ -291,6 +295,7 @@ internal sealed class TrayAppController : IDisposable
         client.Events.AdvancedCommandReceived -= OnAdvancedCommandReceived;
         client.Events.ConnectionStateChanged -= OnConnectionStateChanged;
         client.ListenLoopFaulted -= OnListenLoopFaulted;
+        client.Events.SubscriberFailed -= OnSubscriberFailed;
     }
 
     /// <summary>
@@ -308,6 +313,7 @@ internal sealed class TrayAppController : IDisposable
         client.Events.AdvancedCommandReceived += OnAdvancedCommandReceived;
         client.Events.ConnectionStateChanged += OnConnectionStateChanged;
         client.ListenLoopFaulted += OnListenLoopFaulted;
+        client.Events.SubscriberFailed += OnSubscriberFailed;
 
         // The connect-time catch-up returns recent activity whether or not a previous run already
         // showed it, so seed the stream with the last id this app showed for this bot host. With
@@ -394,7 +400,8 @@ internal sealed class TrayAppController : IDisposable
     /// The listen loop ended because of an unexpected exception rather than a
     /// deliberate StopListening()/restart. Left unhandled, the tray icon would
     /// silently freeze on its last status with no further events ever
-    /// arriving — so surface it and restart listening if we're still logged in.
+    /// arriving — so surface it and restart listening if we're still logged in,
+    /// backing off when it keeps faulting (see <see cref="ListenLoopRestarter"/>).
     /// </summary>
     /// <param name="sender">The <see cref="CompanionClient"/> whose loop faulted (unused).</param>
     /// <param name="ex">The exception that ended the loop (unused; the balloon shows a fixed message).</param>
@@ -403,13 +410,37 @@ internal sealed class TrayAppController : IDisposable
         _environment.Dispatcher.Invoke(() =>
         {
             _trayIcon.ShowBalloon(_options.DisplayName, "Lost connection to the event stream — reconnecting…");
-
-            if (_companionClient.IsLoggedIn)
-            {
-                _companionClient.StartListening();
-            }
+            CompanionClient faulted = _companionClient;
+            _ = _loopRestarter.RestartAfterFaultAsync(() => RestartListening(faulted));
         });
     }
+
+    /// <summary>Starts <paramref name="client"/> listening again, unless a bot-host change replaced it or it was logged out meanwhile.</summary>
+    /// <param name="client">The client whose listen loop faulted.</param>
+    private void RestartListening(CompanionClient client)
+    {
+        try
+        {
+            if (ReferenceEquals(client, _companionClient) && client.IsLoggedIn)
+            {
+                client.StartListening();
+            }
+        }
+        catch (Exception ex)
+        {
+            // Runs from a fire-and-forget continuation, so nothing else would observe this.
+            ReportUnhandledError(ex);
+        }
+    }
+
+    /// <summary>
+    /// A handler for one of the client's events threw. The event stream caught it and kept
+    /// running, so only report it.
+    /// </summary>
+    /// <param name="sender">The event stream that caught the exception (unused).</param>
+    /// <param name="ex">The exception the handler threw.</param>
+    internal void OnSubscriberFailed(object? sender, Exception ex) =>
+        _ = _environment.Dispatcher.InvokeAsync(() => ReportUnhandledError(ex));
 
     /// <summary>Disconnects, removes the tray icon and releases the single-instance lock.</summary>
     public void Dispose()
