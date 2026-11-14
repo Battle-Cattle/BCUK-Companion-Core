@@ -136,13 +136,39 @@ public sealed class LoopbackOAuthClient
             throw new CompanionAuthException(message, (int)response.StatusCode);
         }
 
-        using JsonDocument document = JsonDocument.Parse(body);
-        if (!document.RootElement.TryGetProperty("token", out JsonElement tokenElement))
+        return ParseTokenResponse(body);
+    }
+
+    /// <summary>Reads the bearer token out of a successful token exchange response.</summary>
+    /// <param name="body">The response body, expected to be a JSON object with a string <c>token</c> field.</param>
+    /// <returns>The token.</returns>
+    /// <exception cref="CompanionAuthException">The body isn't a JSON object, or its token is missing, not a string, or blank.</exception>
+    internal static string ParseTokenResponse(string body)
+    {
+        JsonElement tokenElement;
+        try
         {
-            throw new CompanionAuthException("Token exchange response did not contain a token.");
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("token", out JsonElement found))
+            {
+                throw new CompanionAuthException("Token exchange response did not contain a token.");
+            }
+
+            tokenElement = found.Clone();
+        }
+        catch (JsonException)
+        {
+            throw new CompanionAuthException("Token exchange response was not valid JSON.");
         }
 
-        return tokenElement.GetString() ?? throw new CompanionAuthException("Token exchange returned an empty token.");
+        if (tokenElement.ValueKind != JsonValueKind.String || tokenElement.GetString() is not { } token || string.IsNullOrWhiteSpace(token))
+        {
+            // Saving a blank token would look like a login and then fail on the first connect.
+            throw new CompanionAuthException("Token exchange returned an empty token.");
+        }
+
+        return token;
     }
 
     /// <summary>Reads the <c>error</c> field from an error response's JSON body, or null if the body isn't JSON or has none.</summary>
