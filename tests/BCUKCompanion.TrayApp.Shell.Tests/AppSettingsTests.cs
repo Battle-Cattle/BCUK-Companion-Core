@@ -222,6 +222,35 @@ public sealed class AppSettingsTests : IDisposable
     }
 
     [Fact]
+    public void Load_SavedSettingsWithoutABotHost_UseTheBundledHostAndKeepTheRest()
+    {
+        WriteSettingsFile("""{ "StartWithWindows": true }""");
+
+        WithBundledFileNextToTheApp("""{ "botHost": "https://bundled.example.org" }""", () =>
+        {
+            AppSettings loaded = AppSettings.Load();
+
+            Assert.Equal("https://bundled.example.org", loaded.BotHost);
+            Assert.True(loaded.StartWithWindows);
+        });
+    }
+
+    [Fact]
+    public void Load_ValidSavedSettings_DoNotDependOnTheBundledFile()
+    {
+        WriteSettingsFile("""{ "BotHost": "https://saved.example.org" }""");
+
+        WithBundledFileNextToTheApp("""{ "botHost": "https://bundled.example.org" }""", () =>
+        {
+            // Locked against reading, as an unreadable install would be.
+            using var locked = new FileStream(
+                Path.Combine(AppContext.BaseDirectory, "appsettings.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+            Assert.Equal("https://saved.example.org", AppSettings.Load().BotHost);
+        });
+    }
+
+    [Fact]
     public void Load_NoSavedSettingsAndAMalformedBundledFile_KeepsTheHardCodedDefault()
     {
         WithBundledFileNextToTheApp("""{ "botHost": 42 }""", () =>

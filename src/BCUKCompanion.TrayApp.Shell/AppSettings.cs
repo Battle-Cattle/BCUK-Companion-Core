@@ -43,15 +43,16 @@ public sealed class AppSettings
     /// <returns>The saved settings, or defaults when they can't be used; never null.</returns>
     public static AppSettings Load()
     {
-        AppSettings defaults = LoadDefaultsFromBundledConfig(Path.Combine(AppContext.BaseDirectory, "appsettings.json"));
+        // Read only when needed, so an unreadable bundled file can't affect valid saved settings.
+        string bundledPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
         if (ReadSavedSettings() is not { } saved)
         {
-            return defaults;
+            return LoadDefaultsFromBundledConfig(bundledPath);
         }
 
         if (!IsValidBotHost(saved.BotHost))
         {
-            saved.BotHost = defaults.BotHost;
+            saved.BotHost = LoadDefaultsFromBundledConfig(bundledPath).BotHost;
         }
 
         // An explicit JSON null overrides the initializer; startup reads this map.
@@ -59,7 +60,11 @@ public sealed class AppSettings
         return saved;
     }
 
-    /// <summary>Reads and parses settings.json, backing up a file that isn't valid JSON.</summary>
+    /// <summary>
+    /// Reads and parses settings.json, backing up a file that isn't valid JSON. A file with no
+    /// <c>BotHost</c> gets an empty one, so <see cref="Load"/> replaces it with the bundled host
+    /// rather than keeping the property's placeholder default.
+    /// </summary>
     /// <returns>The parsed settings, or null when the file is missing, can't be read, or isn't a valid settings object.</returns>
     private static AppSettings? ReadSavedSettings()
     {
@@ -81,7 +86,14 @@ public sealed class AppSettings
 
         try
         {
-            return JsonSerializer.Deserialize<AppSettings>(json);
+            using JsonDocument document = JsonDocument.Parse(json);
+            AppSettings? saved = document.Deserialize<AppSettings>();
+            if (saved is not null && !document.RootElement.TryGetProperty(nameof(BotHost), out _))
+            {
+                saved.BotHost = string.Empty;
+            }
+
+            return saved;
         }
         catch (JsonException)
         {
@@ -111,7 +123,7 @@ public sealed class AppSettings
                 settings.BotHost = bundledBotHost;
             }
         }
-        catch (Exception ex) when (ex is IOException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             // Use the hard-coded default above.
         }
