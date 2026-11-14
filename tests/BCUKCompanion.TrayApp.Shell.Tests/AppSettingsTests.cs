@@ -63,8 +63,8 @@ public sealed class AppSettingsTests : IDisposable
 
     [Theory]
     [InlineData("{ not json")]
-    [InlineData("""{ "BotHost": "http://insecure.example.org" }""")]
-    [InlineData("""{ "BotHost": "not a url" }""")]
+    [InlineData("[]")]
+    [InlineData("null")]
     public void Load_UnusableFile_FallsBackToDefaults(string json)
     {
         WriteSettingsFile(json);
@@ -72,8 +72,54 @@ public sealed class AppSettingsTests : IDisposable
         AppSettings loaded = AppSettings.Load();
 
         Assert.StartsWith("https://", loaded.BotHost);
-        Assert.NotEqual("http://insecure.example.org", loaded.BotHost);
         Assert.False(loaded.StartWithWindows);
+        Assert.Empty(loaded.LastActivityEventIds);
+    }
+
+    [Fact]
+    public void Load_CorruptFile_IsBackedUpBeforeItsReplaced()
+    {
+        WriteSettingsFile("{ not json");
+
+        AppSettings.Load();
+
+        Assert.Equal("{ not json", File.ReadAllText(AppPaths.SettingsFile + ".bak"));
+    }
+
+    [Theory]
+    [InlineData("\"http://insecure.example.org\"")]
+    [InlineData("\"not a url\"")]
+    [InlineData("null")]
+    public void Load_InvalidBotHost_KeepsTheOtherSettings(string botHost)
+    {
+        WriteSettingsFile($$"""{ "BotHost": {{botHost}}, "StartWithWindows": true, "LastActivityEventIds": { "https://bot.example.org": 7 } }""");
+
+        AppSettings loaded = AppSettings.Load();
+
+        Assert.StartsWith("https://", loaded.BotHost);
+        Assert.True(loaded.StartWithWindows);
+        Assert.Equal(7, loaded.LastActivityEventIds["https://bot.example.org"]);
+    }
+
+    [Fact]
+    public void Load_SettingsPathIsAFolder_FallsBackToDefaults()
+    {
+        Directory.CreateDirectory(AppPaths.SettingsFile);
+
+        AppSettings loaded = AppSettings.Load();
+
+        Assert.StartsWith("https://", loaded.BotHost);
+    }
+
+    [Fact]
+    public void Save_FailedWrite_LeavesNoTempFile()
+    {
+        Directory.CreateDirectory(AppPaths.SettingsFile);
+
+        Exception ex = Assert.ThrowsAny<Exception>(new AppSettings { BotHost = "https://bot.example.org" }.Save);
+
+        Assert.True(ex is IOException or UnauthorizedAccessException, ex.ToString());
+        Assert.False(File.Exists(AppPaths.SettingsFile + ".tmp"));
     }
 
     [Fact]
