@@ -26,8 +26,9 @@ internal sealed class ListenLoopRestarter
 
     /// <summary>Records a fault and waits as long as the faults so far call for, then runs <paramref name="restart"/>.</summary>
     /// <param name="restart">Starts listening again. Runs on the caller's synchronization context.</param>
-    /// <returns>A task that completes once <paramref name="restart"/> has run.</returns>
-    public async Task RestartAfterFaultAsync(Action restart)
+    /// <param name="onFailure">Told about an exception <paramref name="restart"/> throws, which nothing else would observe.</param>
+    /// <returns>A task that completes once <paramref name="restart"/> has run; it never faults.</returns>
+    public async Task RestartAfterFaultAsync(Action restart, Action<Exception> onFailure)
     {
         TimeSpan delay = NextDelay();
         if (delay > TimeSpan.Zero)
@@ -35,7 +36,14 @@ internal sealed class ListenLoopRestarter
             await Task.Delay(delay, _timeProvider).ConfigureAwait(true);
         }
 
-        restart();
+        try
+        {
+            restart();
+        }
+        catch (Exception ex)
+        {
+            onFailure(ex);
+        }
     }
 
     /// <summary>Records a fault now and works out how long to wait before restarting after it.</summary>

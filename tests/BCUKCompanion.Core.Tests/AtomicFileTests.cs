@@ -45,6 +45,20 @@ public sealed class AtomicFileTests : IDisposable
     }
 
     [Fact]
+    public void WriteAllBytes_TempPathThatCantBeWrittenOrDeleted_ThrowsAndLeavesItAlone()
+    {
+        // A folder where the temp file should go: the write fails, and so does the cleanup delete.
+        string path = Path.Combine(folder, "file.json");
+        Directory.CreateDirectory(path + AtomicFile.TempSuffix);
+
+        Exception ex = Assert.ThrowsAny<Exception>(() => AtomicFile.WriteAllBytes(path, [1]));
+
+        Assert.True(ex is IOException or UnauthorizedAccessException, ex.ToString());
+        Assert.True(Directory.Exists(path + AtomicFile.TempSuffix));
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public void TryBackUp_CopiesTheFileAlongside()
     {
         string path = Path.Combine(folder, "file.json");

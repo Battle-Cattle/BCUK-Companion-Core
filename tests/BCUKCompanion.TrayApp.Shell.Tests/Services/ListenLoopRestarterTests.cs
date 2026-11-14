@@ -14,7 +14,7 @@ public sealed class ListenLoopRestarterTests
         var restarter = new ListenLoopRestarter(clock);
         int restarts = 0;
 
-        Task task = restarter.RestartAfterFaultAsync(() => restarts++);
+        Task task = restarter.RestartAfterFaultAsync(() => restarts++, ex => throw ex);
 
         Assert.True(task.IsCompletedSuccessfully);
         Assert.Equal(1, restarts);
@@ -48,9 +48,9 @@ public sealed class ListenLoopRestarterTests
     {
         var restarter = new ListenLoopRestarter(clock);
         int restarts = 0;
-        await restarter.RestartAfterFaultAsync(() => restarts++);
+        await restarter.RestartAfterFaultAsync(() => restarts++, ex => throw ex);
 
-        Task second = restarter.RestartAfterFaultAsync(() => restarts++);
+        Task second = restarter.RestartAfterFaultAsync(() => restarts++, ex => throw ex);
         clock.Advance(TimeSpan.FromSeconds(0.7));
         Assert.False(second.IsCompleted);
         Assert.Equal(1, restarts);
@@ -58,5 +58,17 @@ public sealed class ListenLoopRestarterTests
         clock.Advance(TimeSpan.FromSeconds(0.6));
         await second.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(2, restarts);
+    }
+
+    [Fact]
+    public void ARestartThatThrows_IsReportedRatherThanFaultingTheTask()
+    {
+        var restarter = new ListenLoopRestarter(clock);
+        Exception? reported = null;
+
+        Task task = restarter.RestartAfterFaultAsync(() => throw new InvalidOperationException("no"), ex => reported = ex);
+
+        Assert.True(task.IsCompletedSuccessfully);
+        Assert.Equal("no", reported?.Message);
     }
 }

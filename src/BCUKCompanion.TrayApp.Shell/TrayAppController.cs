@@ -412,7 +412,7 @@ internal sealed class TrayAppController : IDisposable
         {
             _trayIcon.ShowBalloon(_options.DisplayName, "Lost connection to the event stream — reconnecting…");
             CompanionClient faulted = _companionClient;
-            _ = _loopRestarter.RestartAfterFaultAsync(() => RestartListening(faulted));
+            _ = _loopRestarter.RestartAfterFaultAsync(() => RestartListening(faulted), ex => ReportUnhandledError(ex));
         });
     }
 
@@ -420,17 +420,9 @@ internal sealed class TrayAppController : IDisposable
     /// <param name="client">The client whose listen loop faulted.</param>
     private void RestartListening(CompanionClient client)
     {
-        try
+        if (ReferenceEquals(client, _companionClient) && client.IsLoggedIn)
         {
-            if (ReferenceEquals(client, _companionClient) && client.IsLoggedIn)
-            {
-                client.StartListening();
-            }
-        }
-        catch (Exception ex)
-        {
-            // Runs from a fire-and-forget continuation, so nothing else would observe this.
-            ReportUnhandledError(ex);
+            client.StartListening();
         }
     }
 

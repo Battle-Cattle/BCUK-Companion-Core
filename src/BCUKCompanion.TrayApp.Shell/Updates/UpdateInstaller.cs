@@ -19,6 +19,11 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     /// <summary>Starts the swap script's process; tests replace it to check what would run.</summary>
     internal Action<ProcessStartInfo> StartProcess { get; init; } = startInfo => Process.Start(startInfo)?.Dispose();
 
+    /// <summary>Downloads <paramref name="update"/> and starts the script that swaps it in, without a cancellation token (see the other overload).</summary>
+    /// <param name="update">The release to download and install.</param>
+    /// <returns>A task that completes once the swap script has been started.</returns>
+    public Task PrepareAndLaunchAsync(AvailableUpdate update) => PrepareAndLaunchAsync(update, CancellationToken.None);
+
     /// <summary>
     /// Downloads and extracts <paramref name="update"/>, then starts the script that swaps it in
     /// once this process exits. The caller must shut the app down straight after this returns.
@@ -28,7 +33,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     /// <param name="update">The release to download and install.</param>
     /// <param name="cancellationToken">Cancels the download and extraction.</param>
     /// <returns>A task that completes once the swap script has been started.</returns>
-    public async Task PrepareAndLaunchAsync(AvailableUpdate update, CancellationToken cancellationToken = default)
+    public async Task PrepareAndLaunchAsync(AvailableUpdate update, CancellationToken cancellationToken)
     {
         string installDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         string exePath = Environment.ProcessPath ?? throw new InvalidOperationException("Can't determine the running executable's path.");

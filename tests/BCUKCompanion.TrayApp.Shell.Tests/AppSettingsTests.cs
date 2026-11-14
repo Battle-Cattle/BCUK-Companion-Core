@@ -112,6 +112,17 @@ public sealed class AppSettingsTests : IDisposable
     }
 
     [Fact]
+    public void Load_SettingsFileLockedByAnotherWriter_FallsBackToDefaults()
+    {
+        WriteSettingsFile("""{ "BotHost": "https://bot.example.org", "StartWithWindows": true }""");
+        using var locked = new FileStream(AppPaths.SettingsFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        AppSettings loaded = AppSettings.Load();
+
+        Assert.False(loaded.StartWithWindows);
+    }
+
+    [Fact]
     public void Save_FailedWrite_LeavesNoTempFile()
     {
         Directory.CreateDirectory(AppPaths.SettingsFile);

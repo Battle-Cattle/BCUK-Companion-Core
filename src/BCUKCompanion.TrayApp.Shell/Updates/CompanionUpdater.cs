@@ -39,7 +39,7 @@ internal sealed class CompanionUpdater
     private CompanionUpdater(GitHubReleaseUpdateChecker checker, string displayName, string dataFolderName, Action<string, string> showBalloon)
         : this(
             checker,
-            update => new UpdateInstaller(checker, dataFolderName, AppPaths.UpdateResultFile).PrepareAndLaunchAsync(update),
+            new UpdateInstaller(checker, dataFolderName, AppPaths.UpdateResultFile).PrepareAndLaunchAsync,
             displayName,
             new WpfUpdateUi($"{displayName} updates", showBalloon),
             new UpdateAttemptLog(AppPaths.UpdateResultFile))
