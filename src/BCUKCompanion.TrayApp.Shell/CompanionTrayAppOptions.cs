@@ -41,6 +41,17 @@ public sealed class CompanionTrayAppOptions
     public Func<EventActionDispatcher>? CreateEventActionDispatcher { get; init; }
 
     /// <summary>
+    /// Whether events' actions may run at the same time. By default (false) each event's
+    /// <see cref="OnBotEventAsync"/> and mapped actions wait until the previous event's have
+    /// finished, so events are handled one at a time in the order they arrived and two mappings
+    /// can't interleave (e.g. one turning a light red and another turning it blue). A Delay action
+    /// holds up the events behind it. Balloons and <see cref="OnBotEvent"/> still happen as each
+    /// event arrives, and events that need acknowledging keep reporting progress while they wait,
+    /// so the bot doesn't time them out. Set true to run each event's actions as soon as it arrives.
+    /// </summary>
+    public bool RunEventActionsConcurrently { get; init; }
+
+    /// <summary>
     /// Invoked on the UI thread for every bot event (redemption, activity or advanced command),
     /// so a companion app can react to it without owning any bot-connection logic itself.
     /// </summary>

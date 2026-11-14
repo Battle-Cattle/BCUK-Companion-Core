@@ -82,6 +82,77 @@ public sealed class BotEventHandlerTests : IDisposable
         Assert.Equal(error, body.GetProperty("error").GetString());
     }
 
+    /// <summary>An action whose every run waits until the test releases it, signalling when each run starts.</summary>
+    private sealed class GatedAction : IEventAction
+    {
+        public SemaphoreSlim Started { get; } = new(0);
+
+        public ConcurrentQueue<TaskCompletionSource> Runs { get; } = new();
+
+        public string Kind => "gated";
+
+        public string Describe(IEventActionContext context) => Kind;
+
+        public IReadOnlyList<string> Validate(IEventActionContext context) => [];
+
+        public async Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken)
+        {
+            var run = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Runs.Enqueue(run);
+            Started.Release();
+            await run.Task;
+            return true;
+        }
+
+        public void FinishOldest()
+        {
+            Assert.True(Runs.TryDequeue(out TaskCompletionSource? run));
+            run.SetResult();
+        }
+    }
+
+    [Fact]
+    public async Task OverlappingEvents_RunTheirActionsOneAtATimeInArrivalOrder()
+    {
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+        });
+
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(await gated.Started.WaitAsync(TimeSpan.FromMilliseconds(200)));
+        Assert.Equal(2, balloons.Count); // Both events are announced straight away.
+
+        gated.FinishOldest();
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        gated.FinishOldest();
+        await DrainAsync();
+    }
+
+    [Fact]
+    public async Task OverlappingEvents_RunAtOnceWhenTheHostOptsOut()
+    {
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+            RunEventActionsConcurrently = true,
+        });
+
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        gated.FinishOldest();
+        gated.FinishOldest();
+        await DrainAsync();
+    }
+
     [Fact]
     public async Task OnRedemption_WithoutAck_ShowsABalloonAndHandsTheHostTheEvent()
     {

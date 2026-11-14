@@ -16,6 +16,10 @@ internal sealed class BotEventHandler
     private readonly Func<Func<Task>, Task> _runOnUiThread;
     private readonly Action<string, string> _showBalloon;
 
+    // Completes when the last event queued to run its actions in turn has finished (see InTurnAsync).
+    // Only read and replaced on the UI thread.
+    private Task _lastInTurn = Task.CompletedTask;
+
     /// <summary>Creates the handler for a tray app with <paramref name="options"/>; balloons go through <paramref name="showBalloon"/>.</summary>
     /// <param name="options">The host app's handlers and action dispatcher.</param>
     /// <param name="runOnUiThread">
@@ -158,15 +162,15 @@ internal sealed class BotEventHandler
 
     /// <summary>
     /// Runs every bot event — redemption, activity or advanced command — through the same steps:
-    /// the host's <see cref="CompanionTrayAppOptions.OnBotEvent"/>, then its awaited
-    /// <see cref="CompanionTrayAppOptions.OnBotEventAsync"/>, then (when the host set
-    /// <see cref="CompanionTrayAppOptions.CreateEventActionDispatcher"/>) the event's mapped
-    /// actions, with a balloon for any that fail. Returns the acknowledgement an advanced command
-    /// or a confirmation-required redemption should send; the other events ignore it.
+    /// the host's <see cref="CompanionTrayAppOptions.OnBotEvent"/> straight away, then, in turn
+    /// with other events' (see <see cref="CompanionTrayAppOptions.RunEventActionsConcurrently"/>),
+    /// its awaited <see cref="CompanionTrayAppOptions.OnBotEventAsync"/> and the event's mapped
+    /// actions. Returns the acknowledgement an advanced command or a confirmation-required
+    /// redemption should send; the other events ignore it.
     /// </summary>
     /// <param name="botEvent">The event to hand to the host and the dispatcher.</param>
     /// <returns>A task that completes with whether the event was handled successfully, and the error to report when it wasn't; it never faults.</returns>
-    private async Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent)
+    private Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent)
     {
         try
         {
@@ -177,6 +181,42 @@ internal sealed class BotEventHandler
             // Host-supplied callback — don't let it take down the shared tray process.
         }
 
+        return _options.RunEventActionsConcurrently
+            ? RunHandlersAsync(botEvent)
+            : InTurnAsync(() => RunHandlersAsync(botEvent));
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> once every event queued before it has finished, so events'
+    /// actions run one at a time in the order the events arrived. Called on the UI thread.
+    /// </summary>
+    /// <param name="work">Runs the event's handlers; it never faults.</param>
+    /// <returns>A task that completes with <paramref name="work"/>'s result once it has run.</returns>
+    private async Task<(bool Ok, string? Error)> InTurnAsync(Func<Task<(bool Ok, string? Error)>> work)
+    {
+        Task previous = _lastInTurn;
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _lastInTurn = finished.Task;
+        try
+        {
+            await previous.ConfigureAwait(true);
+            return await work().ConfigureAwait(true);
+        }
+        finally
+        {
+            finished.SetResult();
+        }
+    }
+
+    /// <summary>
+    /// Runs the host's <see cref="CompanionTrayAppOptions.OnBotEventAsync"/>, then (when the host
+    /// set <see cref="CompanionTrayAppOptions.CreateEventActionDispatcher"/>) the event's mapped
+    /// actions, with a balloon for any that fail, and combines their results into one acknowledgement.
+    /// </summary>
+    /// <param name="botEvent">The event to hand to the host and the dispatcher.</param>
+    /// <returns>A task that completes with whether the event was handled successfully, and the error to report when it wasn't; it never faults.</returns>
+    private async Task<(bool Ok, string? Error)> RunHandlersAsync(BotEventArgs botEvent)
+    {
         EventDispatchResult? hostResult = null;
         string? hostError = null;
         if (_options.OnBotEventAsync is { } handler)
