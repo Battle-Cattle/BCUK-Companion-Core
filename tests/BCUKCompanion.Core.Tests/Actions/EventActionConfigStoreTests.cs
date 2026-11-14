@@ -94,6 +94,19 @@ public sealed class EventActionConfigStoreTests : IDisposable
         Assert.True(File.Exists(store.ConfigFilePath + ".bak"));
     }
 
+    // Runs on Windows too: there the move onto a folder fails with UnauthorizedAccessException, not IOException.
+    [Fact]
+    [Trait("Platform", "Windows")]
+    public void Save_FailedWrite_LeavesNoTempFileAndThrows()
+    {
+        Directory.CreateDirectory(store.ConfigFilePath);
+
+        Exception ex = Assert.ThrowsAny<Exception>(() => store.Save(new TestConfig()));
+
+        Assert.True(ex is IOException or UnauthorizedAccessException, ex.ToString());
+        Assert.False(File.Exists(store.ConfigFilePath + ".tmp"));
+    }
+
     [Fact]
     public void Save_ThenLoad_RoundTripsCommandMappingsAsAString()
     {

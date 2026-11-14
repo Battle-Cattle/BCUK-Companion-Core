@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 
@@ -71,11 +70,6 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
     /// <returns>The config <see cref="Load"/> should return.</returns>
     protected virtual TConfig OnLoaded(TConfig config) => config;
 
-    /// <summary>The folder holding the config file: the data folder, or a subfolder of it.</summary>
-    private string ConfigFolderPath =>
-        // The constructor resolves ConfigFilePath inside the data folder, so it always has a parent folder.
-        Path.GetDirectoryName(ConfigFilePath)!;
-
     /// <summary>Reads and parses the existing file. A file that isn't valid JSON is backed up and replaced by a new <typeparamref name="TConfig"/>; I/O and permission errors propagate.</summary>
     /// <returns>The parsed config; a new <typeparamref name="TConfig"/> when the file is corrupt or holds JSON <c>null</c>.</returns>
     private TConfig ReadConfigFile()
@@ -93,35 +87,18 @@ public abstract class EventActionConfigStore<TConfig> where TConfig : new()
             // as corruption would hand the caller an empty TConfig indistinguishable from a
             // real reset, and a subsequent Save() would then overwrite an otherwise-intact
             // file with that empty snapshot.
-            TryBackUpCorruptConfig();
+            AtomicFile.TryBackUp(ConfigFilePath);
             return new TConfig();
         }
     }
 
-    /// <summary>Writes <paramref name="config"/> to the file, through a temp file so a crash mid-write can't leave it half-written.</summary>
+    /// <summary>Writes <paramref name="config"/> to the file with <see cref="AtomicFile"/>, so a crash or power cut mid-save can't leave it empty or half-written.</summary>
     /// <param name="config">The config to save.</param>
     public void Save(TConfig config)
     {
         lock (syncRoot)
         {
-            Directory.CreateDirectory(ConfigFolderPath);
-
-            var tempPath = ConfigFilePath + ".tmp";
-            File.WriteAllText(tempPath, JsonSerializer.Serialize(config, serializerOptions));
-            File.Move(tempPath, ConfigFilePath, overwrite: true);
-        }
-    }
-
-    /// <summary>Copies the corrupt file to <c>.bak</c> so the user can recover it, logging rather than throwing if that fails.</summary>
-    private void TryBackUpCorruptConfig()
-    {
-        try
-        {
-            File.Copy(ConfigFilePath, ConfigFilePath + ".bak", overwrite: true);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Failed to back up corrupt config '{ConfigFilePath}': {ex}");
+            AtomicFile.WriteAllText(ConfigFilePath, JsonSerializer.Serialize(config, serializerOptions));
         }
     }
 }

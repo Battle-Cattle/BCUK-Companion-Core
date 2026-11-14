@@ -15,6 +15,11 @@ internal sealed class BotEventHandler
     private readonly CompanionTrayAppOptions _options;
     private readonly Func<Func<Task>, Task> _runOnUiThread;
     private readonly Action<string, string> _showBalloon;
+    private readonly TimeProvider _timeProvider;
+
+    // Completes when the last event queued to run its actions in turn has finished (see InTurnAsync).
+    // Only read and replaced on the UI thread.
+    private Task _lastInTurn = Task.CompletedTask;
 
     /// <summary>Creates the handler for a tray app with <paramref name="options"/>; balloons go through <paramref name="showBalloon"/>.</summary>
     /// <param name="options">The host app's handlers and action dispatcher.</param>
@@ -23,11 +28,14 @@ internal sealed class BotEventHandler
     /// dispatcher's <c>InvokeAsync</c>). Its tasks are never awaited: each handler catches its own errors.
     /// </param>
     /// <param name="showBalloon">Shows a tray balloon (title, text).</param>
-    public BotEventHandler(CompanionTrayAppOptions options, Func<Func<Task>, Task> runOnUiThread, Action<string, string> showBalloon)
+    /// <param name="timeProvider">Times the progress pings sent while an event's actions run or wait; null for the system clock.</param>
+    public BotEventHandler(
+        CompanionTrayAppOptions options, Func<Func<Task>, Task> runOnUiThread, Action<string, string> showBalloon, TimeProvider? timeProvider = null)
     {
         _options = options;
         _runOnUiThread = runOnUiThread;
         _showBalloon = showBalloon;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     private static readonly Dictionary<string, string> ActivityTitles = new(StringComparer.Ordinal)
@@ -71,22 +79,25 @@ internal sealed class BotEventHandler
                 return;
             }
 
+            var expiry = new AckExpiry(_timeProvider);
             (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
-                () => HandleBotEventAsync(botEvent),
-                ct => client.ReportRedemptionProgressAsync(redemption.Id, ct)).ConfigureAwait(true);
+                () => HandleBotEventAsync(botEvent, expiry),
+                expiry.Watch(ct => client.ReportRedemptionProgressAsync(redemption.Id, ct)),
+                null,
+                _timeProvider).ConfigureAwait(true);
             await TrySendAckAsync(() => client.AckRedemptionAsync(redemption.Id, ok, error)).ConfigureAwait(true);
         });
     }
 
     /// <summary>
-    /// Shows a balloon for a follow/sub/raid/... and hands it to the host's handlers. Queued on the
-    /// UI thread ahead of the tray app's save of its activity id, so the id is only saved once
-    /// the activity has been handled.
+    /// Shows a balloon for a follow/sub/raid/... and hands it to the host's handlers. The tray
+    /// app saves the activity's id only once the returned task completes (see <see cref="ActivityCheckpoint"/>).
     /// </summary>
     /// <param name="activity">The follow/sub/raid/... event to announce and hand on.</param>
-    public void OnActivity(CompanionActivityEvent activity)
+    /// <returns>A task that completes once the host's handlers have finished with the activity.</returns>
+    public Task OnActivity(CompanionActivityEvent activity)
     {
-        _ = _runOnUiThread(async () =>
+        return _runOnUiThread(async () =>
         {
             string title = ActivityTitles.TryGetValue(activity.Type, out string? knownTitle) ? knownTitle : activity.Type;
             string text = string.IsNullOrEmpty(activity.Detail)
@@ -94,7 +105,9 @@ internal sealed class BotEventHandler
                 : $"{activity.DisplayName} — {activity.Detail}";
             _showBalloon(title, text);
 
-            await HandleBotEventAsync(new BotEventArgs(
+            // Not queued behind other events' actions: activities have no mapped actions, and their
+            // id isn't saved until this finishes, so waiting would only hold up the checkpoint.
+            await HandleBotEventAsync(queued: false, botEvent: new BotEventArgs(
                 "activity.received",
                 new Dictionary<string, string?>
                 {
@@ -130,9 +143,12 @@ internal sealed class BotEventHandler
                 return;
             }
 
+            var expiry = new AckExpiry(_timeProvider);
             (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
-                () => HandleBotEventAsync(botEvent),
-                ct => client.ReportCommandProgressAsync(command.Id, ct)).ConfigureAwait(true);
+                () => HandleBotEventAsync(botEvent, expiry),
+                expiry.Watch(ct => client.ReportCommandProgressAsync(command.Id, ct)),
+                null,
+                _timeProvider).ConfigureAwait(true);
             await TrySendAckAsync(() => client.AckAdvancedCommandAsync(command.Id, ok, error)).ConfigureAwait(true);
         });
     }
@@ -158,15 +174,19 @@ internal sealed class BotEventHandler
 
     /// <summary>
     /// Runs every bot event — redemption, activity or advanced command — through the same steps:
-    /// the host's <see cref="CompanionTrayAppOptions.OnBotEvent"/>, then its awaited
-    /// <see cref="CompanionTrayAppOptions.OnBotEventAsync"/>, then (when the host set
-    /// <see cref="CompanionTrayAppOptions.CreateEventActionDispatcher"/>) the event's mapped
-    /// actions, with a balloon for any that fail. Returns the acknowledgement an advanced command
-    /// or a confirmation-required redemption should send; the other events ignore it.
+    /// the host's <see cref="CompanionTrayAppOptions.OnBotEvent"/> straight away, then its awaited
+    /// <see cref="CompanionTrayAppOptions.OnBotEventAsync"/> and the event's mapped actions. Unless
+    /// <paramref name="queued"/> is false or the host set
+    /// <see cref="CompanionTrayAppOptions.RunEventActionsConcurrently"/>, those wait their turn behind
+    /// earlier events', and an event whose <paramref name="expiry"/> says the bot stopped waiting
+    /// for it meanwhile is skipped. Returns the acknowledgement an advanced command or a
+    /// confirmation-required redemption should send; the other events ignore it.
     /// </summary>
     /// <param name="botEvent">The event to hand to the host and the dispatcher.</param>
+    /// <param name="expiry">Tracks whether the bot still waits for an acknowledgement-required event; null for one that needs none.</param>
+    /// <param name="queued">False to run the handlers at once rather than in turn with other events'.</param>
     /// <returns>A task that completes with whether the event was handled successfully, and the error to report when it wasn't; it never faults.</returns>
-    private async Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent)
+    private Task<(bool Ok, string? Error)> HandleBotEventAsync(BotEventArgs botEvent, AckExpiry? expiry = null, bool queued = true)
     {
         try
         {
@@ -177,6 +197,55 @@ internal sealed class BotEventHandler
             // Host-supplied callback — don't let it take down the shared tray process.
         }
 
+        return !queued || _options.RunEventActionsConcurrently
+            ? RunHandlersAsync(botEvent)
+            : InTurnAsync(() => expiry is { Expired: true } ? SkipExpired(botEvent) : RunHandlersAsync(botEvent));
+    }
+
+    /// <summary>Reports an event skipped because the bot stopped waiting for it while it was queued.</summary>
+    /// <param name="botEvent">The skipped event.</param>
+    /// <returns>A completed task with a failed acknowledgement saying why the event didn't run.</returns>
+    private Task<(bool Ok, string? Error)> SkipExpired(BotEventArgs botEvent)
+    {
+        const string reason = "The bot stopped waiting for this event before its turn came, so its actions didn't run.";
+        string name = botEvent.Metadata.TryGetValue("rewardTitle", out string? title) && title is not null
+            ? title
+            : botEvent.Metadata.GetValueOrDefault("commandName") ?? botEvent.EventName;
+        _showBalloon($"Skipped {name}", reason);
+        return Task.FromResult<(bool Ok, string? Error)>((false, reason));
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> once every event queued before it has finished, so events'
+    /// actions run one at a time in the order the events arrived. Called on the UI thread.
+    /// </summary>
+    /// <param name="work">Runs the event's handlers; it never faults.</param>
+    /// <returns>A task that completes with <paramref name="work"/>'s result once it has run.</returns>
+    private async Task<(bool Ok, string? Error)> InTurnAsync(Func<Task<(bool Ok, string? Error)>> work)
+    {
+        Task previous = _lastInTurn;
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _lastInTurn = finished.Task;
+        try
+        {
+            await previous.ConfigureAwait(true);
+            return await work().ConfigureAwait(true);
+        }
+        finally
+        {
+            finished.SetResult();
+        }
+    }
+
+    /// <summary>
+    /// Runs the host's <see cref="CompanionTrayAppOptions.OnBotEventAsync"/>, then (when the host
+    /// set <see cref="CompanionTrayAppOptions.CreateEventActionDispatcher"/>) the event's mapped
+    /// actions, with a balloon for any that fail, and combines their results into one acknowledgement.
+    /// </summary>
+    /// <param name="botEvent">The event to hand to the host and the dispatcher.</param>
+    /// <returns>A task that completes with whether the event was handled successfully, and the error to report when it wasn't; it never faults.</returns>
+    private async Task<(bool Ok, string? Error)> RunHandlersAsync(BotEventArgs botEvent)
+    {
         EventDispatchResult? hostResult = null;
         string? hostError = null;
         if (_options.OnBotEventAsync is { } handler)

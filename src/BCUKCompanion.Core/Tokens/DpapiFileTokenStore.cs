@@ -51,34 +51,15 @@ public sealed class DpapiFileTokenStore : ITokenStore
     /// <param name="token">The companion bearer token to save.</param>
     public void Save(string token)
     {
-        string? directory = Path.GetDirectoryName(_filePath);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
         byte[] plaintext = Encoding.UTF8.GetBytes(token);
         try
         {
             byte[] encrypted = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.CurrentUser);
 
             // Written to a temp file, flushed to disk, then swapped in, so a crash or power loss
-            // mid-write can't leave a truncated blob that silently logs the user out.
-            try
-            {
-                using (var stream = new FileStream(_tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-                {
-                    stream.Write(encrypted, 0, encrypted.Length);
-                    stream.Flush(flushToDisk: true);
-                }
-                File.Move(_tempPath, _filePath, overwrite: true);
-            }
-            catch
-            {
-                // Don't leave a copy of the token behind; the saved token file is untouched.
-                TryDelete(_tempPath);
-                throw;
-            }
+            // mid-write can't leave a truncated blob that silently logs the user out. A failed
+            // write deletes the temp file, so no copy of the token is left behind.
+            AtomicFile.WriteAllBytes(_filePath, encrypted);
         }
         finally
         {
@@ -105,19 +86,6 @@ public sealed class DpapiFileTokenStore : ITokenStore
             File.Delete(path);
         }
         catch (DirectoryNotFoundException)
-        {
-        }
-    }
-
-    /// <summary>Best-effort delete used while already handling a failure, so it never masks that failure.</summary>
-    /// <param name="path">The full path of the file to delete; any I/O or permission error is ignored.</param>
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            File.Delete(path);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
         }
     }

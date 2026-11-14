@@ -23,6 +23,8 @@ public sealed class BotEventHandlerTests : IDisposable
 
     public void Dispose() => client.Dispose();
 
+    private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider clock = new();
+
     private BotEventHandler CreateHandler(CompanionTrayAppOptions? options = null) => new(
         options ?? new CompanionTrayAppOptions { OnBotEvent = hostEvents.Enqueue },
         work =>
@@ -31,7 +33,8 @@ public sealed class BotEventHandlerTests : IDisposable
             queued.Add(task);
             return task;
         },
-        (title, text) => { lock (balloons) { balloons.Add((title, text)); } });
+        (title, text) => { lock (balloons) { balloons.Add((title, text)); } },
+        clock);
 
     /// <summary>Waits for every queued handler to finish, as the UI thread would run them.</summary>
     private Task DrainAsync() => Task.WhenAll(queued);
@@ -39,10 +42,10 @@ public sealed class BotEventHandlerTests : IDisposable
     private static Func<EventActionDispatcher> Dispatching(string name, EventActionTriggerKind kind, params IEventAction[] actions) =>
         () => new EventActionDispatcher(() => [new EventActionMapping(name, actions, kind)], () => new EmptyContext());
 
-    private static RedemptionEvent Redemption(bool ackRequired) => new()
+    private static RedemptionEvent Redemption(bool ackRequired, string id = "r-1") => new()
     {
         Type = "channel_points_redemption",
-        Id = "r-1",
+        Id = id,
         RewardId = "reward-1",
         RewardTitle = "Lights",
         UserLogin = "viewer",
@@ -80,6 +83,194 @@ public sealed class BotEventHandlerTests : IDisposable
         Assert.Equal(eventId, body.GetProperty("eventId").GetString());
         Assert.Equal(ok, body.GetProperty("ok").GetBoolean());
         Assert.Equal(error, body.GetProperty("error").GetString());
+    }
+
+    /// <summary>An action whose every run waits until the test releases it, signalling when each run starts.</summary>
+    private sealed class GatedAction : IEventAction
+    {
+        public SemaphoreSlim Started { get; } = new(0);
+
+        public ConcurrentQueue<TaskCompletionSource> Runs { get; } = new();
+
+        public string Kind => "gated";
+
+        public string Describe(IEventActionContext context) => Kind;
+
+        public IReadOnlyList<string> Validate(IEventActionContext context) => [];
+
+        public async Task<bool> ExecuteAsync(IEventActionContext context, CancellationToken cancellationToken)
+        {
+            var run = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Runs.Enqueue(run);
+            Started.Release();
+            await run.Task;
+            return true;
+        }
+
+        public void FinishOldest()
+        {
+            Assert.True(Runs.TryDequeue(out TaskCompletionSource? run));
+            run.SetResult();
+        }
+    }
+
+    [Fact]
+    public async Task OverlappingEvents_RunTheirActionsOneAtATimeInArrivalOrder()
+    {
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+        });
+
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.False(await gated.Started.WaitAsync(TimeSpan.FromMilliseconds(200)));
+        Assert.Equal(2, balloons.Count); // Both events are announced straight away.
+
+        gated.FinishOldest();
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        gated.FinishOldest();
+        await DrainAsync();
+    }
+
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!condition())
+        {
+            await Task.Delay(10, timeout.Token);
+        }
+    }
+
+    [Fact]
+    public async Task AnActivity_DoesNotWaitBehindAnotherEventsActions()
+    {
+        var gated = new GatedAction();
+        var hostSaw = new ConcurrentQueue<string>();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+            OnBotEventAsync = e =>
+            {
+                hostSaw.Enqueue(e.EventName);
+                return Task.FromResult<EventDispatchResult?>(null);
+            },
+        });
+
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        handler.OnActivity(new CompanionActivityEvent { Type = "follow", Id = 1, DisplayName = "Fan" });
+
+        await WaitForAsync(() => hostSaw.Contains("activity.received"));
+        gated.FinishOldest();
+        await DrainAsync();
+    }
+
+    [Fact]
+    public async Task AnActivitysTask_CompletesOnlyOnceTheHostsHandlerHas()
+    {
+        var hostDone = new TaskCompletionSource<EventDispatchResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions { OnBotEventAsync = _ => hostDone.Task });
+
+        Task handled = handler.OnActivity(new CompanionActivityEvent { Type = "follow", Id = 1, DisplayName = "Fan" });
+        await Task.Delay(50);
+        Assert.False(handled.IsCompleted);
+
+        hostDone.SetResult(null);
+        await handled.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task AQueuedEventTheBotStopsWaitingFor_IsSkippedAndAcknowledgedAsFailed()
+    {
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+        });
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Queued behind the first; its first progress ping hears the bot isn't waiting any more.
+        handler.OnRedemption(client, Redemption(ackRequired: true, id: "r-2"));
+        clock.Advance(AckProgressPinger.DefaultInterval);
+        await WaitForAsync(() => http.Requests.Any(r => r.Path == "/api/companion/rewards/progress"));
+        gated.FinishOldest();
+        await DrainAsync();
+
+        Assert.False(await gated.Started.WaitAsync(TimeSpan.FromMilliseconds(100)));
+        var ack = Assert.Single(http.Requests, r => r.Path == "/api/companion/rewards/ack");
+        Assert.Equal("r-2", ack.Body!.Value.GetProperty("eventId").GetString());
+        Assert.False(ack.Body.Value.GetProperty("ok").GetBoolean());
+        Assert.Contains(balloons, b => b.Title == "Skipped Lights");
+    }
+
+    [Fact]
+    public async Task AQueuedCommandTheBotStopsWaitingFor_IsSkippedAndAcknowledgedAsFailed()
+    {
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+        });
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        handler.OnAdvancedCommand(client, Command());
+        clock.Advance(AckProgressPinger.DefaultInterval);
+        await WaitForAsync(() => http.Requests.Any(r => r.Path == "/api/companion/commands/progress"));
+        gated.FinishOldest();
+        await DrainAsync();
+
+        var ack = Assert.Single(http.Requests, r => r.Path == "/api/companion/commands/ack");
+        Assert.Equal("c-1", ack.Body!.Value.GetProperty("eventId").GetString());
+        Assert.False(ack.Body.Value.GetProperty("ok").GetBoolean());
+        Assert.Contains(balloons, b => b.Title == "Skipped Hydrate");
+    }
+
+    [Fact]
+    public async Task AQueuedEventWhosePingsKeepFailing_IsSkippedOnceTheBotWouldHaveTimedItOut()
+    {
+        var failing = new RecordingHttpHandler(System.Net.HttpStatusCode.ServiceUnavailable, "{}");
+        using var unreachable = new CompanionClient(new Uri("https://bot.example.com"), new MemoryTokenStore("token"), new HttpClient(failing));
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+        });
+        handler.OnRedemption(unreachable, Redemption(ackRequired: false));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        handler.OnRedemption(unreachable, Redemption(ackRequired: true, id: "r-2"));
+        clock.Advance(TimeSpan.FromMinutes(3));
+        gated.FinishOldest();
+        await DrainAsync();
+
+        Assert.False(await gated.Started.WaitAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Contains(balloons, b => b.Title == "Skipped Lights");
+    }
+
+    [Fact]
+    public async Task OverlappingEvents_RunAtOnceWhenTheHostOptsOut()
+    {
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+            RunEventActionsConcurrently = true,
+        });
+
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+        handler.OnRedemption(client, Redemption(ackRequired: false));
+
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        gated.FinishOldest();
+        gated.FinishOldest();
+        await DrainAsync();
     }
 
     [Fact]

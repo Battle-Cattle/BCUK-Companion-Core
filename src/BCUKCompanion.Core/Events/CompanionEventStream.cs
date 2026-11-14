@@ -42,6 +42,19 @@ public sealed class CompanionEventStream
     /// </summary>
     internal TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// How long a connection must stay open before its drop resets the reconnect backoff. Longer
+    /// than the server's 25s ping interval, so a server or proxy that accepts the connection and
+    /// closes it straight away is retried with a growing delay rather than about once a second.
+    /// </summary>
+    internal TimeSpan StableConnectionTime { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Test seam: the clock <see cref="StableConnectionTime"/> is measured with.</summary>
+    internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    /// <summary>Test seam: maps the number of failed attempts in a row to the delay before the next one.</summary>
+    internal Func<int, TimeSpan> ReconnectDelay { get; set; } = ReconnectBackoff.GetDelay;
+
     /// <summary>Raised for each channel-point redemption, once per redemption even across reconnects.</summary>
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
     /// <summary>Raised for each streamer activity event (follow, sub, raid, …), including ones backfilled after a reconnect.</summary>
@@ -50,6 +63,14 @@ public sealed class CompanionEventStream
     public event EventHandler<AdvancedCommandEvent>? AdvancedCommandReceived;
     /// <summary>Raised whenever the connection state changes.</summary>
     public event EventHandler<CompanionConnectionState>? ConnectionStateChanged;
+
+    /// <summary>
+    /// Raised when a subscriber to one of this stream's other events throws. The stream catches
+    /// the exception so one faulty subscriber can't disconnect it or stop the subscribers after
+    /// it, and reports it here instead. An exception thrown by this event's own subscribers is
+    /// only traced.
+    /// </summary>
+    public event EventHandler<Exception>? SubscriberFailed;
 
     /// <summary>
     /// Raised with the new value whenever <see cref="LastActivityEventId"/> advances, so a host can
@@ -100,24 +121,24 @@ public sealed class CompanionEventStream
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connecting);
+            Raise(ConnectionStateChanged, CompanionConnectionState.Connecting);
 
-            (bool shouldStop, bool wasConnected) = await ConnectOnceAsync(token, cancellationToken).ConfigureAwait(false);
+            (bool shouldStop, bool stayedConnected) = await ConnectOnceAsync(token, cancellationToken).ConfigureAwait(false);
             if (shouldStop)
             {
                 return;
             }
 
-            ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Disconnected);
+            Raise(ConnectionStateChanged, CompanionConnectionState.Disconnected);
 
-            if (wasConnected)
+            if (stayedConnected)
             {
                 attempt = 0;
             }
 
             try
             {
-                await Task.Delay(ReconnectBackoff.GetDelay(attempt), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(ReconnectDelay(attempt), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -131,8 +152,8 @@ public sealed class CompanionEventStream
     /// <summary>Connects once. ShouldStop is true if the caller should stop retrying (auth failure).</summary>
     /// <param name="token">The companion bearer token to connect with.</param>
     /// <param name="cancellationToken">The caller's cancellation; a cancel also ends the connection.</param>
-    /// <returns>A task whose result says whether to stop retrying (a 401) and whether the stream connected successfully before it ended, which resets the backoff.</returns>
-    private async Task<(bool ShouldStop, bool WasConnected)> ConnectOnceAsync(string token, CancellationToken cancellationToken)
+    /// <returns>A task whose result says whether to stop retrying (a 401) and whether the stream stayed connected for at least <see cref="StableConnectionTime"/> before it ended, which resets the backoff.</returns>
+    private async Task<(bool ShouldStop, bool StayedConnected)> ConnectOnceAsync(string token, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/events");
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
@@ -162,30 +183,31 @@ public sealed class CompanionEventStream
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested
             && ex is HttpRequestException or IOException or TaskCanceledException or System.Net.Sockets.SocketException)
         {
-            return (ShouldStop: false, WasConnected: false);
+            return (ShouldStop: false, StayedConnected: false);
         }
 
         using (response)
         {
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                ConnectionStateChanged?.Invoke(this, CompanionConnectionState.AuthenticationFailed);
-                return (ShouldStop: true, WasConnected: false);
+                Raise(ConnectionStateChanged, CompanionConnectionState.AuthenticationFailed);
+                return (ShouldStop: true, StayedConnected: false);
             }
 
             if (response.StatusCode == (HttpStatusCode)429)
             {
-                ConnectionStateChanged?.Invoke(this, CompanionConnectionState.RateLimited);
-                return (ShouldStop: false, WasConnected: false);
+                Raise(ConnectionStateChanged, CompanionConnectionState.RateLimited);
+                return (ShouldStop: false, StayedConnected: false);
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return (ShouldStop: false, WasConnected: false);
+                return (ShouldStop: false, StayedConnected: false);
             }
 
-            ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connected);
+            Raise(ConnectionStateChanged, CompanionConnectionState.Connected);
             ResetIdleTimer(idleCts, IdleTimeout);
+            long connectedAt = TimeProvider.GetTimestamp();
 
             try
             {
@@ -222,8 +244,23 @@ public sealed class CompanionEventStream
                 // same as the connect-phase catch above.
             }
 
-            return (ShouldStop: false, WasConnected: true);
+            return (ShouldStop: false, StayedConnected: TimeProvider.GetElapsedTime(connectedAt) >= StableConnectionTime);
         }
+    }
+
+    /// <summary>Raises <paramref name="handler"/>, reporting a subscriber that throws through <see cref="SubscriberFailed"/> rather than letting it end the listen loop.</summary>
+    /// <typeparam name="T">The event's argument type.</typeparam>
+    /// <param name="handler">The event to raise.</param>
+    /// <param name="args">The event's argument.</param>
+    private void Raise<T>(EventHandler<T>? handler, T args) =>
+        SubscriberInvoker.Raise(handler, this, args, ReportSubscriberFailure);
+
+    /// <summary>Raises <see cref="SubscriberFailed"/> for <paramref name="failure"/>, and traces it.</summary>
+    /// <param name="failure">The exception a subscriber threw.</param>
+    private void ReportSubscriberFailure(Exception failure)
+    {
+        System.Diagnostics.Trace.TraceError("A companion event subscriber threw: {0}", failure);
+        SubscriberInvoker.Raise(SubscriberFailed, this, failure, ex => System.Diagnostics.Trace.TraceError("A SubscriberFailed subscriber threw: {0}", ex));
     }
 
     /// <summary>Restarts the idle countdown after the stream received something, ignoring a stream already torn down.</summary>
@@ -289,7 +326,7 @@ public sealed class CompanionEventStream
             if (valid.Count > 0 && MarkSeen(valid[^1]))
             {
                 // No activity to dispatch here, so the host only hears about the new mark.
-                LastActivityEventIdChanged?.Invoke(this, valid[^1].Id);
+                Raise(LastActivityEventIdChanged, valid[^1].Id);
             }
             return;
         }
@@ -406,8 +443,8 @@ public sealed class CompanionEventStream
     /// <param name="activity">The newly seen activity.</param>
     private void DispatchActivity(CompanionActivityEvent activity)
     {
-        ActivityReceived?.Invoke(this, activity);
-        LastActivityEventIdChanged?.Invoke(this, activity.Id);
+        Raise(ActivityReceived, activity);
+        Raise(LastActivityEventIdChanged, activity.Id);
     }
 
     /// <summary>Parses a channel-point redemption frame and raises <see cref="RedemptionReceived"/> if it's complete.</summary>
@@ -416,7 +453,7 @@ public sealed class CompanionEventStream
     {
         if (EventJson.TryDeserialize(data, out RedemptionEvent? redemption) && IsComplete(redemption))
         {
-            RedemptionReceived?.Invoke(this, redemption);
+            Raise(RedemptionReceived, redemption);
         }
     }
 
@@ -426,7 +463,7 @@ public sealed class CompanionEventStream
     {
         if (EventJson.TryDeserialize(data, out AdvancedCommandEvent? command) && IsComplete(command) && MarkCommandSeen(command.Id))
         {
-            AdvancedCommandReceived?.Invoke(this, command);
+            Raise(AdvancedCommandReceived, command);
         }
     }
 

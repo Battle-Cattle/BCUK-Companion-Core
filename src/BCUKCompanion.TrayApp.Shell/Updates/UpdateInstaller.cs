@@ -13,10 +13,16 @@ namespace BCUKCompanion.TrayApp.Updates;
 /// </summary>
 /// <param name="checker">The release checker used to download the update package.</param>
 /// <param name="dataFolderName">The app's data folder name, used to name the temp folder the update is extracted into.</param>
-internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string dataFolderName)
+/// <param name="resultFile">Where the swap script records how it went, for the next launch to read (see <see cref="UpdateAttemptLog"/>).</param>
+internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string dataFolderName, string resultFile)
 {
     /// <summary>Starts the swap script's process; tests replace it to check what would run.</summary>
     internal Action<ProcessStartInfo> StartProcess { get; init; } = startInfo => Process.Start(startInfo)?.Dispose();
+
+    /// <summary>Downloads <paramref name="update"/> and starts the script that swaps it in, without a cancellation token (see the other overload).</summary>
+    /// <param name="update">The release to download and install.</param>
+    /// <returns>A task that completes once the swap script has been started.</returns>
+    public Task PrepareAndLaunchAsync(AvailableUpdate update) => PrepareAndLaunchAsync(update, CancellationToken.None);
 
     /// <summary>
     /// Downloads and extracts <paramref name="update"/>, then starts the script that swaps it in
@@ -27,7 +33,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     /// <param name="update">The release to download and install.</param>
     /// <param name="cancellationToken">Cancels the download and extraction.</param>
     /// <returns>A task that completes once the swap script has been started.</returns>
-    public async Task PrepareAndLaunchAsync(AvailableUpdate update, CancellationToken cancellationToken = default)
+    public async Task PrepareAndLaunchAsync(AvailableUpdate update, CancellationToken cancellationToken)
     {
         string installDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
         string exePath = Environment.ProcessPath ?? throw new InvalidOperationException("Can't determine the running executable's path.");
@@ -57,7 +63,8 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             CreateNoWindow = true,
         };
         foreach (string arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", scriptPath }
-            .Concat(new ApplyUpdateRequest(Environment.ProcessId, stagingDir, installDir, exePath, workDir).ToScriptArguments()))
+            .Concat(new ApplyUpdateRequest(
+                Environment.ProcessId, stagingDir, installDir, exePath, workDir, update.Version.ToString(3), resultFile).ToScriptArguments()))
         {
             startInfo.ArgumentList.Add(arg);
         }
@@ -86,7 +93,8 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     /// starts, and the work folder (with the backup and an update-failed.log) is kept for manual
     /// recovery. If the restore fails too, the folder may hold a mix of both builds, so the app is
     /// not relaunched; restore-failed.log records why. If the app hasn't exited within WaitSeconds,
-    /// nothing is touched. Exits 1 when it doesn't relaunch the app, 0 when it does.
+    /// nothing is touched. If starting the app again fails, relaunch-failed.log records why and the
+    /// work folder is kept. Exits 1 when it doesn't relaunch the app, 0 when it does.
     /// Files the new build no longer ships are left in place rather than mirroring, so nothing a
     /// user dropped into the folder gets deleted.
     /// </summary>
@@ -97,9 +105,21 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
             [string]$Target,
             [string]$Exe,
             [string]$WorkDir,
+            [string]$Version = '',
+            [string]$ResultFile = '',
             [int]$WaitSeconds = 60
         )
         $ErrorActionPreference = 'Stop'
+
+        # Best-effort, like Write-Log: tells the app's next launch how this run went.
+        function Write-Result([string]$Outcome) {
+            if (-not $ResultFile) { return }
+            try {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $ResultFile) -Force | Out-Null
+                @{ version = $Version; outcome = $Outcome; workDir = $WorkDir; reported = $false } |
+                    ConvertTo-Json | Out-File -FilePath $ResultFile -Encoding utf8 -Force
+            } catch { }
+        }
 
         function Copy-Tree([string]$From, [string]$To) {
             for ($attempt = 1; $attempt -le 10; $attempt++) {
@@ -120,6 +140,7 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
 
         try { Wait-Process -Id $ProcessId -Timeout $WaitSeconds } catch { }
         if (Get-Process -Id $ProcessId -ErrorAction SilentlyContinue) {
+            Write-Result 'notExited'
             exit 1
         }
 
@@ -142,10 +163,20 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
         }
 
         if (-not $updated -and -not $restored) {
+            Write-Result 'failed'
             exit 1
         }
 
-        Start-Process -FilePath $Exe -WorkingDirectory $Target
+        if ($updated) { Write-Result 'installed' } else { Write-Result 'restored' }
+
+        # The work folder (and this log) is kept when the app can't be started again.
+        try {
+            Start-Process -FilePath $Exe -WorkingDirectory $Target
+        } catch {
+            Write-Log 'relaunch-failed.log' $_
+            exit 1
+        }
+
         if ($updated) {
             Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
         }

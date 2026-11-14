@@ -106,6 +106,25 @@ public class LoopbackOAuthClientTests
         return result;
     }
 
+    [Theory]
+    [InlineData("""{"token":""}""")]
+    [InlineData("""{"token":"   "}""")]
+    [InlineData("""{"token":null}""")]
+    [InlineData("""{"token":123}""")]
+    [InlineData("""{"other":"x"}""")]
+    [InlineData("""["token"]""")]
+    [InlineData("<html>Bad gateway</html>")]
+    public void ParseTokenResponse_RejectsAMissingBlankOrMalformedToken(string body)
+    {
+        Assert.Throws<CompanionAuthException>(() => LoopbackOAuthClient.ParseTokenResponse(body));
+    }
+
+    [Fact]
+    public void ParseTokenResponse_ReturnsTheToken()
+    {
+        Assert.Equal("issued", LoopbackOAuthClient.ParseTokenResponse("""{"token":"issued","expiresAt":null}"""));
+    }
+
     [Fact]
     public void GenerateStateProducesNonEmptyUniqueValues()
     {

@@ -18,6 +18,7 @@ public sealed class ApplyUpdateScriptTests : IDisposable
     private readonly string target;
     private readonly string work;
     private readonly string relaunchMarker;
+    private readonly string resultFile;
 
     public ApplyUpdateScriptTests()
     {
@@ -25,6 +26,7 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         target = Path.Combine(root, "target");
         work = Path.Combine(root, "work");
         relaunchMarker = Path.Combine(root, "relaunched.txt");
+        resultFile = Path.Combine(root, "data", "update-result.json");
         foreach (string dir in new[] { source, target, work })
         {
             Directory.CreateDirectory(dir);
@@ -62,7 +64,20 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         Assert.Equal("new", File.ReadAllText(Path.Combine(target, "Added.dll")));
         Assert.Equal("mine", File.ReadAllText(Path.Combine(target, "user-notes.txt")));
         Assert.False(Directory.Exists(work));
+        AssertOutcome(UpdateAttempt.Installed);
         await AssertRelaunchedAsync();
+    }
+
+    [SkippableFact]
+    public async Task RelaunchFails_LogsWhyAndKeepsTheWorkFolder()
+    {
+        Process script = StartScriptRelaunching(ExitedProcessId(), Path.Combine(root, "missing", "MyApp.exe"));
+
+        Assert.Equal(1, await WaitForExitAsync(script));
+
+        Assert.Equal("new", File.ReadAllText(Path.Combine(target, "MyApp.exe")));
+        Assert.True(File.Exists(Path.Combine(work, "relaunch-failed.log")));
+        AssertOutcome(UpdateAttempt.Installed);
     }
 
     [SkippableFact]
@@ -83,6 +98,7 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         Assert.True(File.Exists(Path.Combine(work, "update-failed.log")));
         Assert.Equal("old", File.ReadAllText(Path.Combine(work, "backup", "MyApp.exe")));
         Assert.False(File.Exists(Path.Combine(work, "restore-failed.log")));
+        AssertOutcome(UpdateAttempt.Restored);
         await AssertRelaunchedAsync();
     }
 
@@ -100,6 +116,7 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         Assert.True(File.Exists(Path.Combine(work, "restore-failed.log")));
         Assert.True(Directory.Exists(Path.Combine(work, "backup")));
         Assert.False(File.Exists(relaunchMarker));
+        AssertOutcome(UpdateAttempt.Failed);
     }
 
     [SkippableFact]
@@ -113,6 +130,7 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         Assert.False(File.Exists(Path.Combine(target, "Added.dll")));
         Assert.False(Directory.Exists(Path.Combine(work, "backup")));
         Assert.False(File.Exists(relaunchMarker));
+        AssertOutcome(UpdateAttempt.NotExited);
     }
 
     /// <summary>Windows PowerShell on Windows, else pwsh from PATH or the dotnet global tools folder; skips the test if there's none.</summary>
@@ -185,14 +203,17 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         }
     }
 
-    private Process StartScript(int processId, params string[] extraArguments)
+    private Process StartScript(int processId, params string[] extraArguments) =>
+        StartScriptRelaunching(processId, CreateRelaunchStub(), extraArguments);
+
+    private Process StartScriptRelaunching(int processId, string exe, params string[] extraArguments)
     {
         string scriptPath = Path.Combine(root, "apply-update.ps1");
         File.WriteAllText(scriptPath, UpdateInstaller.ApplyUpdateScript);
 
         var startInfo = new ProcessStartInfo(FindPowerShell()) { UseShellExecute = false, CreateNoWindow = true };
         foreach (string arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath }
-            .Concat(new ApplyUpdateRequest(processId, source, target, CreateRelaunchStub(), work).ToScriptArguments())
+            .Concat(new ApplyUpdateRequest(processId, source, target, exe, work, "1.2.0", resultFile).ToScriptArguments())
             .Concat(extraArguments))
         {
             startInfo.ArgumentList.Add(arg);
@@ -215,6 +236,15 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         File.WriteAllText(sh, $"#!/bin/sh\necho relaunched > '{relaunchMarker}'\n");
         File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return sh;
+    }
+
+    /// <summary>Checks the script recorded <paramref name="outcome"/> for the next launch, unreported and naming its work folder.</summary>
+    private void AssertOutcome(string outcome)
+    {
+        UpdateAttempt? attempt = new UpdateAttemptLog(resultFile).Read();
+
+        Assert.NotNull(attempt);
+        Assert.Equal(new UpdateAttempt("1.2.0", outcome, work, Reported: false), attempt);
     }
 
     private async Task AssertRelaunchedAsync()

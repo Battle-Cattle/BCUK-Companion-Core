@@ -1,5 +1,7 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using BCUKCompanion.Core;
 
 namespace BCUKCompanion.TrayApp;
 
@@ -35,31 +37,76 @@ public sealed class AppSettings
 
     /// <summary>
     /// Reads settings.json, falling back to the bundled appsettings.json defaults when it's
-    /// missing, unreadable or has an invalid bot host.
+    /// missing, unreadable or not valid JSON (a corrupt file is first copied to
+    /// <c>settings.json.bak</c>). A saved file whose bot host is missing or invalid keeps its
+    /// other settings and takes only the bot host from the defaults.
     /// </summary>
     /// <returns>The saved settings, or defaults when they can't be used; never null.</returns>
     public static AppSettings Load()
     {
-        try
+        // Read only when needed, so an unreadable bundled file can't affect valid saved settings.
+        string bundledPath = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        if (ReadSavedSettings() is not { } saved)
         {
-            if (File.Exists(AppPaths.SettingsFile))
-            {
-                string json = File.ReadAllText(AppPaths.SettingsFile);
-                AppSettings? loaded = JsonSerializer.Deserialize<AppSettings>(json);
-                if (loaded is not null && IsValidBotHost(loaded.BotHost))
-                {
-                    // An explicit JSON null overrides the initializer; startup reads this map.
-                    loaded.LastActivityEventIds ??= new();
-                    return loaded;
-                }
-            }
-        }
-        catch (Exception ex) when (ex is IOException or JsonException)
-        {
-            // Fall through to defaults — a corrupt settings file shouldn't block startup.
+            return LoadDefaultsFromBundledConfig(bundledPath);
         }
 
-        return LoadDefaultsFromBundledConfig(Path.Combine(AppContext.BaseDirectory, "appsettings.json"));
+        if (!IsValidBotHost(saved.BotHost))
+        {
+            saved.BotHost = LoadDefaultsFromBundledConfig(bundledPath).BotHost;
+        }
+
+        // An explicit JSON null overrides the initializer; startup reads this map.
+        saved.LastActivityEventIds ??= new();
+        return saved;
+    }
+
+    /// <summary>
+    /// Reads and parses settings.json, backing up a file that isn't valid JSON. A file whose
+    /// <c>BotHost</c> is missing or not a string gets an empty one, so <see cref="Load"/> replaces it
+    /// with the bundled host rather than keeping the placeholder default or discarding the file.
+    /// </summary>
+    /// <returns>The parsed settings, or null when the file is missing, can't be read, or isn't a valid settings object.</returns>
+    private static AppSettings? ReadSavedSettings()
+    {
+        string json;
+        try
+        {
+            if (!File.Exists(AppPaths.SettingsFile))
+            {
+                return null;
+            }
+
+            json = File.ReadAllText(AppPaths.SettingsFile);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // An unreadable settings file shouldn't stop the app starting.
+            return null;
+        }
+
+        try
+        {
+            if (JsonNode.Parse(json) is not JsonObject root)
+            {
+                // Valid JSON but not an object (e.g. null or a number): unusable, like a corrupt file.
+                return null;
+            }
+
+            // A missing or non-string BotHost becomes empty, so Load replaces just the host with the
+            // bundled one rather than keeping the placeholder default or losing every other setting.
+            if (root[nameof(BotHost)] is not JsonValue host || host.GetValueKind() != JsonValueKind.String)
+            {
+                root[nameof(BotHost)] = string.Empty;
+            }
+
+            return root.Deserialize<AppSettings>();
+        }
+        catch (JsonException)
+        {
+            AtomicFile.TryBackUp(AppPaths.SettingsFile);
+            return null;
+        }
     }
 
     /// <summary>Whether <paramref name="botHost"/> is an absolute https URL, as the companion API requires.</summary>
@@ -83,7 +130,7 @@ public sealed class AppSettings
                 settings.BotHost = bundledBotHost;
             }
         }
-        catch (Exception ex) when (ex is IOException or JsonException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             // Use the hard-coded default above.
         }
@@ -121,19 +168,8 @@ public sealed class AppSettings
             throw new InvalidOperationException("BotHost must be an absolute https URL before settings can be saved.");
         }
 
-        string settingsFile = AppPaths.SettingsFile;
-        string? directory = Path.GetDirectoryName(settingsFile);
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-
-        // Write to a temp file and swap it in so a crash/power-loss mid-write can't
-        // leave settings.json truncated or invalid JSON.
-        string tempFile = settingsFile + ".tmp";
-        File.WriteAllText(tempFile, json);
-        File.Move(tempFile, settingsFile, overwrite: true);
+        // Through a temp file that's flushed before it's swapped in, so a crash or power cut
+        // mid-save can't leave settings.json truncated or invalid JSON.
+        AtomicFile.WriteAllText(AppPaths.SettingsFile, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
     }
 }

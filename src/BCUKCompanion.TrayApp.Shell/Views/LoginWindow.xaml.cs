@@ -10,6 +10,9 @@ public partial class LoginWindow : Window
     private CompanionClient _companionClient;
     private bool _isBusy;
 
+    // The browser login in progress, so Cancel or closing the window can stop it; null when none is.
+    private CancellationTokenSource? _loginCts;
+
     /// <summary>Raised once a login saved a token, just before the window closes.</summary>
     public event EventHandler? LoginSucceeded;
 
@@ -73,17 +76,26 @@ public partial class LoginWindow : Window
             : "Server updated. No connection has been made yet — log in to this server.";
     }
 
-    /// <summary>Runs the browser login and closes the window on success, or shows why it failed.</summary>
+    /// <summary>
+    /// Runs the browser login and closes the window on success, or shows why it failed. Cancel,
+    /// or closing the window, stops it waiting for the browser.
+    /// </summary>
     /// <param name="sender">The "Login with Discord (opens browser)" button (unused).</param>
     /// <param name="e">Click event data (unused).</param>
     private async void LoginWithBrowserButton_Click(object sender, RoutedEventArgs e)
     {
+        using var cts = new CancellationTokenSource();
+        _loginCts = cts;
         SetBusy(true, string.Empty);
         try
         {
-            await _companionClient.LoginWithBrowserAsync(OpenBrowser).ConfigureAwait(true);
+            await _companionClient.LoginWithBrowserAsync(OpenBrowser, cts.Token).ConfigureAwait(true);
             LoginSucceeded?.Invoke(this, EventArgs.Empty);
             Close();
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            StatusText.Text = "Login cancelled.";
         }
         catch (Exception ex)
         {
@@ -91,8 +103,22 @@ public partial class LoginWindow : Window
         }
         finally
         {
+            _loginCts = null;
             SetBusy(false, StatusText.Text);
         }
+    }
+
+    /// <summary>Stops the browser login in progress, re-enabling the rest of the window.</summary>
+    /// <param name="sender">The Cancel button (unused).</param>
+    /// <param name="e">Click event data (unused).</param>
+    private void CancelLoginButton_Click(object sender, RoutedEventArgs e) => _loginCts?.Cancel();
+
+    /// <summary>Stops any browser login still waiting, so it can't log in after the window is gone.</summary>
+    /// <param name="e">Event data passed on to the base class.</param>
+    protected override void OnClosed(EventArgs e)
+    {
+        _loginCts?.Cancel();
+        base.OnClosed(e);
     }
 
     /// <summary>Saves the pasted token and closes the window, or shows why it couldn't.</summary>
@@ -144,6 +170,7 @@ public partial class LoginWindow : Window
     {
         _isBusy = busy;
         LoginWithBrowserButton.IsEnabled = !busy;
+        CancelLoginButton.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         SaveTokenButton.IsEnabled = !busy;
         ServerHostBox.IsEnabled = !busy;
         ChangeServerButton.IsEnabled = !busy;

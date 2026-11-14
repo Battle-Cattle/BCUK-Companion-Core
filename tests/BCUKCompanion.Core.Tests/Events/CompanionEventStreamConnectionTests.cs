@@ -95,6 +95,40 @@ public sealed class CompanionEventStreamConnectionTests
 
     private static CompanionEventStream Stream(HttpMessageHandler handler) => new(new HttpClient(handler), new Uri("https://bot.example.com"));
 
+    /// <summary>Runs the stream against a server that accepts and closes every connection, returning the first three attempt numbers the backoff was asked for.</summary>
+    private static async Task<List<int>> BackoffAttemptsAsync(TimeSpan stableConnectionTime)
+    {
+        var attempts = new ConcurrentQueue<int>();
+        using var cts = new CancellationTokenSource(TestTimeout);
+        var stream = Stream(new DelegateHandler(() => Ok(string.Empty)));
+        stream.StableConnectionTime = stableConnectionTime;
+        stream.ReconnectDelay = attempt =>
+        {
+            attempts.Enqueue(attempt);
+            if (attempts.Count >= 3)
+            {
+                cts.Cancel();
+            }
+
+            return TimeSpan.Zero;
+        };
+
+        await stream.RunAsync("token", cts.Token);
+        return [.. attempts.Take(3)];
+    }
+
+    [Fact]
+    public async Task AConnectionThatDropsStraightAway_KeepsBackingOff()
+    {
+        Assert.Equal([0, 1, 2], await BackoffAttemptsAsync(TimeSpan.FromMinutes(5)));
+    }
+
+    [Fact]
+    public async Task AConnectionThatStayedUp_ResetsTheBackoff()
+    {
+        Assert.Equal([0, 0, 0], await BackoffAttemptsAsync(TimeSpan.Zero));
+    }
+
     [Fact]
     public async Task ARejectedToken_StopsTheStream()
     {

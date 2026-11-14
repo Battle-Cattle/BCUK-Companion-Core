@@ -15,6 +15,7 @@ internal sealed class CompanionUpdater
     private readonly Func<AvailableUpdate, Task> install;
     private readonly string displayName;
     private readonly IUpdateUi ui;
+    private readonly UpdateAttemptLog attempts;
 
     // Interlocked-guarded: 1 while a check/install is in flight, so a menu click during the
     // launch check (or a double click) doesn't start a second download.
@@ -38,9 +39,10 @@ internal sealed class CompanionUpdater
     private CompanionUpdater(GitHubReleaseUpdateChecker checker, string displayName, string dataFolderName, Action<string, string> showBalloon)
         : this(
             checker,
-            update => new UpdateInstaller(checker, dataFolderName).PrepareAndLaunchAsync(update),
+            new UpdateInstaller(checker, dataFolderName, AppPaths.UpdateResultFile).PrepareAndLaunchAsync,
             displayName,
-            new WpfUpdateUi($"{displayName} updates", showBalloon))
+            new WpfUpdateUi($"{displayName} updates", showBalloon),
+            new UpdateAttemptLog(AppPaths.UpdateResultFile))
     {
     }
 
@@ -49,12 +51,15 @@ internal sealed class CompanionUpdater
     /// <param name="install">Downloads a release and starts the script that swaps it in; throws if it can't.</param>
     /// <param name="displayName">The app's name, for messages.</param>
     /// <param name="ui">Shows messages and balloons, asks questions and shuts the app down.</param>
-    internal CompanionUpdater(GitHubReleaseUpdateChecker checker, Func<AvailableUpdate, Task> install, string displayName, IUpdateUi ui)
+    /// <param name="attempts">Where the update script recorded how its last run went.</param>
+    internal CompanionUpdater(
+        GitHubReleaseUpdateChecker checker, Func<AvailableUpdate, Task> install, string displayName, IUpdateUi ui, UpdateAttemptLog attempts)
     {
         this.checker = checker;
         this.install = install;
         this.displayName = displayName;
         this.ui = ui;
+        this.attempts = attempts;
     }
 
     /// <summary>The release checker for the running app, whose version comes from the host's entry assembly.</summary>
@@ -70,6 +75,30 @@ internal sealed class CompanionUpdater
     /// <summary>The "Check for updates..." tray menu item, which checks now and reports the result.</summary>
     /// <returns>A new menu item that starts an interactive check when clicked.</returns>
     public TrayMenuItem CreateMenuItem() => new("Check for updates...", () => _ = RunAsync(interactive: true));
+
+    /// <summary>
+    /// Tells the user how the last update went if they haven't been told yet: a balloon saying
+    /// it's installed, or why it failed and where its logs are. Call once at launch.
+    /// </summary>
+    public void ReportLastAttempt()
+    {
+        if (attempts.Read() is not { Reported: false } attempt)
+        {
+            return;
+        }
+
+        if (attempt.Succeeded)
+        {
+            ui.ShowBalloon($"{displayName} updated", $"Now running v{attempt.Version}.");
+        }
+        else
+        {
+            string logs = attempt.WorkDir is null ? string.Empty : $" Logs: {attempt.WorkDir}";
+            ui.ShowBalloon("Update failed", $"Couldn't install v{attempt.Version}: {attempt.DescribeFailure()}{logs}");
+        }
+
+        attempts.MarkReported(attempt);
+    }
 
     /// <summary>
     /// Starts the background launch check. Call on the UI thread. Local/dev builds skip it so they
@@ -104,7 +133,7 @@ internal sealed class CompanionUpdater
         try
         {
             var update = await FindUpdateAsync(interactive);
-            if (update is not null && (!interactive || ConfirmInstall(update)))
+            if (update is not null && (interactive ? ConfirmInstall(update) : !FailedBefore(update)))
             {
                 await InstallAsync(update, interactive);
             }
@@ -149,6 +178,15 @@ internal sealed class CompanionUpdater
         return update;
     }
 
+    /// <summary>
+    /// Whether the last install attempt was this same version and failed. The launch check skips
+    /// such a release rather than retrying it on every start; "Check for updates..." still offers it.
+    /// </summary>
+    /// <param name="update">The release the launch check found.</param>
+    /// <returns>True when the last recorded attempt failed to install this version.</returns>
+    private bool FailedBefore(AvailableUpdate update) =>
+        attempts.Read() is { Succeeded: false } attempt && attempt.Version == update.Version.ToString(3);
+
     /// <summary>Asks the user whether to install <paramref name="update"/> now.</summary>
     /// <param name="update">The newer release found by the check.</param>
     /// <returns>True when the user clicked Yes; otherwise false.</returns>
@@ -168,6 +206,8 @@ internal sealed class CompanionUpdater
         }
         catch (Exception ex)
         {
+            // Recorded so the launch check doesn't retry it on every start; already reported below.
+            attempts.Write(new UpdateAttempt(update.Version.ToString(3), UpdateAttempt.PrepareFailed, Reported: true));
             ReportInstallFailure(update, ex, interactive);
             return;
         }

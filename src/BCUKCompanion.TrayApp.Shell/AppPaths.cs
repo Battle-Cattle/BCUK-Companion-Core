@@ -18,4 +18,8 @@ internal static class AppPaths
     /// <summary>The encrypted token file, under %LOCALAPPDATA% (DPAPI-encrypted for this machine, so it doesn't roam).</summary>
     public static string TokenFile => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), _folderName, "token.bin");
+
+    /// <summary>Where the update script records how its last run went, under %LOCALAPPDATA% (see <c>UpdateAttemptLog</c>).</summary>
+    public static string UpdateResultFile => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), _folderName, "update-result.json");
 }

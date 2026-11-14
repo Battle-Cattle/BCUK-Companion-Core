@@ -5,13 +5,18 @@ using Xunit;
 
 namespace BCUKCompanion.TrayApp.Tests.Updates;
 
-public sealed class CompanionUpdaterTests
+public sealed class CompanionUpdaterTests : IDisposable
 {
     private static readonly AppVersion V100 = new(new Version(1, 0, 0), false);
     private static readonly AppVersion DevBuild = new(new Version(0, 0, 0), false);
 
     private readonly FakeUpdateUi ui = new();
     private readonly List<AvailableUpdate> installs = [];
+    private readonly string resultFile = Path.Combine(Path.GetTempPath(), $"bcuk-update-result-{Guid.NewGuid():N}.json");
+
+    public void Dispose() => File.Delete(resultFile);
+
+    private void RecordAttempt(string json) => File.WriteAllText(resultFile, json);
 
     private static string ReleaseJson(string tag) =>
         $$"""
@@ -33,7 +38,8 @@ public sealed class CompanionUpdaterTests
                 return installError is null ? Task.CompletedTask : Task.FromException(installError);
             },
             "App",
-            ui);
+            ui,
+            new UpdateAttemptLog(resultFile));
     }
 
     [Fact]
@@ -69,6 +75,99 @@ public sealed class CompanionUpdaterTests
         await ui.ShutdownRequested.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(new Version(1, 1, 0), Assert.Single(installs).Version);
         Assert.Empty(ui.Questions);
+    }
+
+    [Fact]
+    public async Task CheckOnLaunch_SkipsAVersionThatJustFailedToInstall()
+    {
+        RecordAttempt("""{"version":"1.1.0","outcome":"restored","workDir":"C:\\tmp\\w","reported":true}""");
+
+        await CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"))).RunAsync(interactive: false);
+
+        Assert.Empty(installs);
+        Assert.Empty(ui.Balloons);
+    }
+
+    [Fact]
+    public async Task APreparationFailure_IsRecordedSoTheNextLaunchCheckSkipsThatVersion()
+    {
+        var release = new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"));
+        await CreateUpdater(release, installError: new InvalidDataException("bad checksum")).RunAsync(interactive: false);
+        Assert.Single(installs);
+        ui.Balloons.Clear();
+
+        await CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"))).RunAsync(interactive: false);
+        CreateUpdater(release).ReportLastAttempt();
+
+        Assert.Single(installs);
+        Assert.Empty(ui.Balloons); // Already reported when it failed.
+    }
+
+    [Fact]
+    public async Task CheckOnLaunch_StillInstallsANewerVersionThanTheOneThatFailed()
+    {
+        RecordAttempt("""{"version":"1.1.0","outcome":"restored"}""");
+
+        await CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.2.0"))).RunAsync(interactive: false);
+
+        Assert.Equal(new Version(1, 2, 0), Assert.Single(installs).Version);
+    }
+
+    [Fact]
+    public async Task CheckForUpdates_StillOffersAVersionThatFailedBefore()
+    {
+        RecordAttempt("""{"version":"1.1.0","outcome":"restored"}""");
+        ui.ConfirmAnswer = true;
+
+        await CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"))).RunAsync(interactive: true);
+
+        Assert.Equal(new Version(1, 1, 0), Assert.Single(installs).Version);
+    }
+
+    [Theory]
+    [InlineData("restored", "its files couldn't be copied in, so the previous version was put back.")]
+    [InlineData("failed", "Reinstall from the release page.")]
+    [InlineData("notExited", "the app didn't close in time to be replaced.")]
+    [InlineData("prepareFailed", "the download couldn't be prepared.")]
+    [InlineData("somethingNew", "the update didn't finish.")]
+    public void ReportLastAttempt_AFailure_SaysWhyOnceWithItsLogs(string outcome, string reason)
+    {
+        RecordAttempt($$"""{"version":"1.1.0","outcome":"{{outcome}}","workDir":"C:\\tmp\\w","reported":false}""");
+        var updater = CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0")));
+
+        updater.ReportLastAttempt();
+        updater.ReportLastAttempt();
+
+        (string title, string text) = Assert.Single(ui.Balloons);
+        Assert.Equal("Update failed", title);
+        Assert.StartsWith("Couldn't install v1.1.0: ", text);
+        Assert.Contains(reason, text);
+        Assert.EndsWith(@"Logs: C:\tmp\w", text);
+    }
+
+    [Fact]
+    public void ReportLastAttempt_ASuccess_SaysWhichVersionIsRunning()
+    {
+        RecordAttempt("""{"version":"1.1.0","outcome":"installed"}""");
+
+        CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"))).ReportLastAttempt();
+
+        Assert.Equal(("App updated", "Now running v1.1.0."), Assert.Single(ui.Balloons));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("{ not json")]
+    public void ReportLastAttempt_NoUsableRecord_SaysNothing(string? json)
+    {
+        if (json is not null)
+        {
+            RecordAttempt(json);
+        }
+
+        CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"))).ReportLastAttempt();
+
+        Assert.Empty(ui.Balloons);
     }
 
     [Fact]
