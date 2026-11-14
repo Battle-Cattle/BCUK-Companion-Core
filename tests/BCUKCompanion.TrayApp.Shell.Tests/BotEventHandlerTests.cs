@@ -195,6 +195,28 @@ public sealed class BotEventHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task AQueuedEventWhosePingsKeepFailing_IsSkippedOnceTheBotWouldHaveTimedItOut()
+    {
+        var failing = new RecordingHttpHandler(System.Net.HttpStatusCode.ServiceUnavailable, "{}");
+        using var unreachable = new CompanionClient(new Uri("https://bot.example.com"), new MemoryTokenStore("token"), new HttpClient(failing));
+        var gated = new GatedAction();
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions
+        {
+            CreateEventActionDispatcher = Dispatching("Lights", EventActionTriggerKind.Reward, gated),
+        });
+        handler.OnRedemption(unreachable, Redemption(ackRequired: false));
+        Assert.True(await gated.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        handler.OnRedemption(unreachable, Redemption(ackRequired: true, id: "r-2"));
+        clock.Advance(TimeSpan.FromMinutes(3));
+        gated.FinishOldest();
+        await DrainAsync();
+
+        Assert.False(await gated.Started.WaitAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Contains(balloons, b => b.Title == "Skipped Lights");
+    }
+
+    [Fact]
     public async Task OverlappingEvents_RunAtOnceWhenTheHostOptsOut()
     {
         var gated = new GatedAction();

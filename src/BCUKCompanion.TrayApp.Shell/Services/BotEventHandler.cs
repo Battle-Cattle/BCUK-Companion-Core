@@ -79,7 +79,7 @@ internal sealed class BotEventHandler
                 return;
             }
 
-            var expiry = new AckExpiry();
+            var expiry = new AckExpiry(_timeProvider);
             (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
                 () => HandleBotEventAsync(botEvent, expiry),
                 expiry.Watch(ct => client.ReportRedemptionProgressAsync(redemption.Id, ct)),
@@ -144,7 +144,7 @@ internal sealed class BotEventHandler
                 return;
             }
 
-            var expiry = new AckExpiry();
+            var expiry = new AckExpiry(_timeProvider);
             (bool ok, string? error) = await AckProgressPinger.RunWithProgressAsync(
                 () => HandleBotEventAsync(botEvent, expiry),
                 expiry.Watch(ct => client.ReportCommandProgressAsync(command.Id, ct)),

@@ -6,7 +6,8 @@ namespace BCUKCompanion.Core;
 /// <summary>
 /// Writes files so that a crash or power cut mid-save leaves either the old file or the new
 /// one, never an empty or half-written one: the contents go to <c>&lt;path&gt;.tmp</c>, are
-/// flushed to disk, and only then replace the file.
+/// flushed to disk, and only then replace the file. On Linux the containing directory isn't
+/// synced after the swap, so there a power cut just after a save can still bring back the old file.
 /// </summary>
 public static class AtomicFile
 {
