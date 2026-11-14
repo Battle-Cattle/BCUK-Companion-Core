@@ -90,14 +90,14 @@ internal sealed class BotEventHandler
     }
 
     /// <summary>
-    /// Shows a balloon for a follow/sub/raid/... and hands it to the host's handlers. Queued on the
-    /// UI thread ahead of the tray app's save of its activity id, so the id is only saved once
-    /// the activity has been handled.
+    /// Shows a balloon for a follow/sub/raid/... and hands it to the host's handlers. The tray
+    /// app saves the activity's id only once the returned task completes (see <see cref="ActivityCheckpoint"/>).
     /// </summary>
     /// <param name="activity">The follow/sub/raid/... event to announce and hand on.</param>
-    public void OnActivity(CompanionActivityEvent activity)
+    /// <returns>A task that completes once the host's handlers have finished with the activity.</returns>
+    public Task OnActivity(CompanionActivityEvent activity)
     {
-        _ = _runOnUiThread(async () =>
+        return _runOnUiThread(async () =>
         {
             string title = ActivityTitles.TryGetValue(activity.Type, out string? knownTitle) ? knownTitle : activity.Type;
             string text = string.IsNullOrEmpty(activity.Detail)
@@ -105,9 +105,8 @@ internal sealed class BotEventHandler
                 : $"{activity.DisplayName} — {activity.Detail}";
             _showBalloon(title, text);
 
-            // Not queued behind other events' actions (activities have no mapped actions): the tray
-            // app saves the activity's id once this handler has run, so a restart must not find
-            // the id saved while the activity was still waiting its turn.
+            // Not queued behind other events' actions: activities have no mapped actions, and their
+            // id isn't saved until this finishes, so waiting would only hold up the checkpoint.
             await HandleBotEventAsync(queued: false, botEvent: new BotEventArgs(
                 "activity.received",
                 new Dictionary<string, string?>

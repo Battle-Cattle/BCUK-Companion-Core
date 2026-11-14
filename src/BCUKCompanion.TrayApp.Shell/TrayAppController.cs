@@ -34,6 +34,7 @@ internal sealed class TrayAppController : IDisposable
     private readonly CompanionTrayAppOptions _options;
     private readonly TrayAppEnvironment _environment;
     private readonly ListenLoopRestarter _loopRestarter;
+    private readonly ActivityCheckpoint _activityCheckpoint = new();
     private Mutex? _singleInstanceMutex;
     // Start() assigns these before anything that reads them can run: the tray menu, the windows
     // and the client's event handlers all start from Start(). A Start() that loses the single-instance
@@ -321,8 +322,9 @@ internal sealed class TrayAppController : IDisposable
         // nothing saved yet (first run, or a new host), only record where the server is up to.
         string activityKey = AppSettings.ActivityKey(botHost);
         _lastActivityEventIds.Seed(client.Events, activityKey);
+        // Saved only after every activity before it has been handled (see ActivityCheckpoint).
         client.Events.LastActivityEventIdChanged += (_, id) =>
-            _ = _environment.Dispatcher.InvokeAsync(() => SaveLastActivityEventId(activityKey, id));
+            _activityCheckpoint.Save(() => _environment.Dispatcher.InvokeAsync(() => SaveLastActivityEventId(activityKey, id)).Task);
 
         try
         {
@@ -344,11 +346,11 @@ internal sealed class TrayAppController : IDisposable
     internal void OnRedemptionReceived(object? sender, RedemptionEvent redemption) =>
         _botEvents.OnRedemption(_companionClient, redemption);
 
-    /// <summary>Hands a follow/sub/raid/... activity to the bot-event handler.</summary>
+    /// <summary>Hands a follow/sub/raid/... activity to the bot-event handler, and holds back saving its id until the handler finishes.</summary>
     /// <param name="sender">The client's event stream (unused).</param>
     /// <param name="activity">The activity event that arrived.</param>
     internal void OnActivityReceived(object? sender, CompanionActivityEvent activity) =>
-        _botEvents.OnActivity(activity);
+        _activityCheckpoint.Track(_botEvents.OnActivity(activity));
 
     /// <summary>Hands an advanced command to the bot-event handler, with the client it arrived on.</summary>
     /// <param name="sender">The client's event stream (unused).</param>

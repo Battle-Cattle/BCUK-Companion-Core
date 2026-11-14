@@ -170,6 +170,20 @@ public sealed class BotEventHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task AnActivitysTask_CompletesOnlyOnceTheHostsHandlerHas()
+    {
+        var hostDone = new TaskCompletionSource<EventDispatchResult?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        BotEventHandler handler = CreateHandler(new CompanionTrayAppOptions { OnBotEventAsync = _ => hostDone.Task });
+
+        Task handled = handler.OnActivity(new CompanionActivityEvent { Type = "follow", Id = 1, DisplayName = "Fan" });
+        await Task.Delay(50);
+        Assert.False(handled.IsCompleted);
+
+        hostDone.SetResult(null);
+        await handled.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task AQueuedEventTheBotStopsWaitingFor_IsSkippedAndAcknowledgedAsFailed()
     {
         var gated = new GatedAction();
