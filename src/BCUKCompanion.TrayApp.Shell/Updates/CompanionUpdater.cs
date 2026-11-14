@@ -206,6 +206,8 @@ internal sealed class CompanionUpdater
         }
         catch (Exception ex)
         {
+            // Recorded so the launch check doesn't retry it on every start; already reported below.
+            attempts.Write(new UpdateAttempt(update.Version.ToString(3), UpdateAttempt.PrepareFailed, Reported: true));
             ReportInstallFailure(update, ex, interactive);
             return;
         }

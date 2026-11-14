@@ -41,13 +41,17 @@ public sealed class CompanionTrayAppOptions
     public Func<EventActionDispatcher>? CreateEventActionDispatcher { get; init; }
 
     /// <summary>
-    /// Whether events' actions may run at the same time. By default (false) each event's
-    /// <see cref="OnBotEventAsync"/> and mapped actions wait until the previous event's have
-    /// finished, so events are handled one at a time in the order they arrived and two mappings
-    /// can't interleave (e.g. one turning a light red and another turning it blue). A Delay action
-    /// holds up the events behind it. Balloons and <see cref="OnBotEvent"/> still happen as each
-    /// event arrives, and events that need acknowledging keep reporting progress while they wait,
-    /// so the bot doesn't time them out. Set true to run each event's actions as soon as it arrives.
+    /// Whether redemptions' and advanced commands' actions may run at the same time. By default
+    /// (false) each redemption's or advanced command's <see cref="OnBotEventAsync"/> and mapped
+    /// actions wait until the previous one's have finished, so they're handled one at a time in the
+    /// order they arrived and two mappings can't interleave (e.g. one turning a light red and
+    /// another turning it blue). A Delay action holds up the events behind it. Balloons and
+    /// <see cref="OnBotEvent"/> still happen as each event arrives, and events that need
+    /// acknowledging keep reporting progress while they wait; one the bot stops waiting for is
+    /// skipped. Activity events (follows, subs, raids...) are never queued: their
+    /// <see cref="OnBotEventAsync"/> runs as soon as they arrive and can overlap a redemption's or
+    /// command's, so don't rely on this option to serialize state shared with activity handling.
+    /// Set true to run each redemption's and command's actions as soon as it arrives.
     /// </summary>
     public bool RunEventActionsConcurrently { get; init; }
 

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using BCUKCompanion.Core;
 
 namespace BCUKCompanion.TrayApp;
@@ -61,9 +62,9 @@ public sealed class AppSettings
     }
 
     /// <summary>
-    /// Reads and parses settings.json, backing up a file that isn't valid JSON. A file with no
-    /// <c>BotHost</c> gets an empty one, so <see cref="Load"/> replaces it with the bundled host
-    /// rather than keeping the property's placeholder default.
+    /// Reads and parses settings.json, backing up a file that isn't valid JSON. A file whose
+    /// <c>BotHost</c> is missing or not a string gets an empty one, so <see cref="Load"/> replaces it
+    /// with the bundled host rather than keeping the placeholder default or discarding the file.
     /// </summary>
     /// <returns>The parsed settings, or null when the file is missing, can't be read, or isn't a valid settings object.</returns>
     private static AppSettings? ReadSavedSettings()
@@ -86,14 +87,20 @@ public sealed class AppSettings
 
         try
         {
-            using JsonDocument document = JsonDocument.Parse(json);
-            AppSettings? saved = document.Deserialize<AppSettings>();
-            if (saved is not null && !document.RootElement.TryGetProperty(nameof(BotHost), out _))
+            if (JsonNode.Parse(json) is not JsonObject root)
             {
-                saved.BotHost = string.Empty;
+                // Valid JSON but not an object (e.g. null or a number): unusable, like a corrupt file.
+                return null;
             }
 
-            return saved;
+            // A missing or non-string BotHost becomes empty, so Load replaces just the host with the
+            // bundled one rather than keeping the placeholder default or losing every other setting.
+            if (root[nameof(BotHost)] is not JsonValue host || host.GetValueKind() != JsonValueKind.String)
+            {
+                root[nameof(BotHost)] = string.Empty;
+            }
+
+            return root.Deserialize<AppSettings>();
         }
         catch (JsonException)
         {

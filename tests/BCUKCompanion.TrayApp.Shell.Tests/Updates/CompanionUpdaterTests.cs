@@ -89,6 +89,21 @@ public sealed class CompanionUpdaterTests : IDisposable
     }
 
     [Fact]
+    public async Task APreparationFailure_IsRecordedSoTheNextLaunchCheckSkipsThatVersion()
+    {
+        var release = new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"));
+        await CreateUpdater(release, installError: new InvalidDataException("bad checksum")).RunAsync(interactive: false);
+        Assert.Single(installs);
+        ui.Balloons.Clear();
+
+        await CreateUpdater(new GatedHandler(HttpStatusCode.OK, ReleaseJson("v1.1.0"))).RunAsync(interactive: false);
+        CreateUpdater(release).ReportLastAttempt();
+
+        Assert.Single(installs);
+        Assert.Empty(ui.Balloons); // Already reported when it failed.
+    }
+
+    [Fact]
     public async Task CheckOnLaunch_StillInstallsANewerVersionThanTheOneThatFailed()
     {
         RecordAttempt("""{"version":"1.1.0","outcome":"restored"}""");
@@ -113,6 +128,7 @@ public sealed class CompanionUpdaterTests : IDisposable
     [InlineData("restored", "its files couldn't be copied in, so the previous version was put back.")]
     [InlineData("failed", "Reinstall from the release page.")]
     [InlineData("notExited", "the app didn't close in time to be replaced.")]
+    [InlineData("prepareFailed", "the download couldn't be prepared.")]
     [InlineData("somethingNew", "the update didn't finish.")]
     public void ReportLastAttempt_AFailure_SaysWhyOnceWithItsLogs(string outcome, string reason)
     {

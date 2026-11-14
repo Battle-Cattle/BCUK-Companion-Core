@@ -115,12 +115,15 @@ CompanionTrayApplication.Run(new CompanionTrayAppOptions
   the event's actions, and the shell acknowledges advanced commands from it:
   anything but every mapped action succeeding (including no mapping, or
   leaving both unset) refunds the viewer.
-- Events are handled one at a time, in the order they arrive: an event's
-  `OnBotEventAsync` and mapped actions wait until the previous event's have
-  finished, so two mappings can't interleave (balloons and `OnBotEvent` still
-  fire as each event arrives). A Delay action holds up the events queued behind
-  it. Set `RunEventActionsConcurrently = true` to run each event's actions as
-  soon as it arrives instead.
+- Redemptions and advanced commands are handled one at a time, in the order
+  they arrive: an event's `OnBotEventAsync` and mapped actions wait until the
+  previous one's have finished, so two mappings can't interleave (balloons and
+  `OnBotEvent` still fire as each event arrives). A Delay action holds up the
+  events queued behind it, and a queued event the bot stops waiting for is
+  skipped. Activity events (follows, subs, raids...) aren't queued: their
+  `OnBotEventAsync` runs at once and can overlap a redemption's. Set
+  `RunEventActionsConcurrently = true` to run each redemption's and command's
+  actions as soon as it arrives instead.
 - `EventActionMapping.TriggerKind` decides whether a mapping matches a
   reward title (`Reward`, the default — configs saved before this field
   existed load as rewards) or an advanced command name (`Command`); the

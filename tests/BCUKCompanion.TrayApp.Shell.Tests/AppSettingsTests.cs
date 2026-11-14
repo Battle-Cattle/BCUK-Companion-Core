@@ -90,6 +90,8 @@ public sealed class AppSettingsTests : IDisposable
     [InlineData("\"http://insecure.example.org\"")]
     [InlineData("\"not a url\"")]
     [InlineData("null")]
+    [InlineData("42")]
+    [InlineData("{ \"url\": \"https://x.example.org\" }")]
     public void Load_InvalidBotHost_KeepsTheOtherSettings(string botHost)
     {
         WriteSettingsFile($$"""{ "BotHost": {{botHost}}, "StartWithWindows": true, "LastActivityEventIds": { "https://bot.example.org": 7 } }""");
