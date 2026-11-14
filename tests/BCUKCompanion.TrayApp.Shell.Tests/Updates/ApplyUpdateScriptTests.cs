@@ -69,6 +69,18 @@ public sealed class ApplyUpdateScriptTests : IDisposable
     }
 
     [SkippableFact]
+    public async Task RelaunchFails_LogsWhyAndKeepsTheWorkFolder()
+    {
+        Process script = StartScriptRelaunching(ExitedProcessId(), Path.Combine(root, "missing", "MyApp.exe"));
+
+        Assert.Equal(1, await WaitForExitAsync(script));
+
+        Assert.Equal("new", File.ReadAllText(Path.Combine(target, "MyApp.exe")));
+        Assert.True(File.Exists(Path.Combine(work, "relaunch-failed.log")));
+        AssertOutcome(UpdateAttempt.Installed);
+    }
+
+    [SkippableFact]
     public async Task CopyFails_RestoresTheBackupAndRelaunchesTheOldBuild()
     {
         Task<int> exit;
@@ -191,14 +203,17 @@ public sealed class ApplyUpdateScriptTests : IDisposable
         }
     }
 
-    private Process StartScript(int processId, params string[] extraArguments)
+    private Process StartScript(int processId, params string[] extraArguments) =>
+        StartScriptRelaunching(processId, CreateRelaunchStub(), extraArguments);
+
+    private Process StartScriptRelaunching(int processId, string exe, params string[] extraArguments)
     {
         string scriptPath = Path.Combine(root, "apply-update.ps1");
         File.WriteAllText(scriptPath, UpdateInstaller.ApplyUpdateScript);
 
         var startInfo = new ProcessStartInfo(FindPowerShell()) { UseShellExecute = false, CreateNoWindow = true };
         foreach (string arg in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath }
-            .Concat(new ApplyUpdateRequest(processId, source, target, CreateRelaunchStub(), work, "1.2.0", resultFile).ToScriptArguments())
+            .Concat(new ApplyUpdateRequest(processId, source, target, exe, work, "1.2.0", resultFile).ToScriptArguments())
             .Concat(extraArguments))
         {
             startInfo.ArgumentList.Add(arg);

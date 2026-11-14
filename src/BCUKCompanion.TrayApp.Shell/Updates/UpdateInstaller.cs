@@ -93,7 +93,8 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
     /// starts, and the work folder (with the backup and an update-failed.log) is kept for manual
     /// recovery. If the restore fails too, the folder may hold a mix of both builds, so the app is
     /// not relaunched; restore-failed.log records why. If the app hasn't exited within WaitSeconds,
-    /// nothing is touched. Exits 1 when it doesn't relaunch the app, 0 when it does.
+    /// nothing is touched. If starting the app again fails, relaunch-failed.log records why and the
+    /// work folder is kept. Exits 1 when it doesn't relaunch the app, 0 when it does.
     /// Files the new build no longer ships are left in place rather than mirroring, so nothing a
     /// user dropped into the folder gets deleted.
     /// </summary>
@@ -168,7 +169,14 @@ internal sealed class UpdateInstaller(GitHubReleaseUpdateChecker checker, string
 
         if ($updated) { Write-Result 'installed' } else { Write-Result 'restored' }
 
-        Start-Process -FilePath $Exe -WorkingDirectory $Target
+        # The work folder (and this log) is kept when the app can't be started again.
+        try {
+            Start-Process -FilePath $Exe -WorkingDirectory $Target
+        } catch {
+            Write-Log 'relaunch-failed.log' $_
+            exit 1
+        }
+
         if ($updated) {
             Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
         }
