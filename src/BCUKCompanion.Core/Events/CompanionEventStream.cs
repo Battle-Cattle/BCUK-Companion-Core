@@ -42,6 +42,19 @@ public sealed class CompanionEventStream
     /// </summary>
     internal TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>
+    /// How long a connection must stay open before its drop resets the reconnect backoff. Longer
+    /// than the server's 25s ping interval, so a server or proxy that accepts the connection and
+    /// closes it straight away is retried with a growing delay rather than about once a second.
+    /// </summary>
+    internal TimeSpan StableConnectionTime { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Test seam: the clock <see cref="StableConnectionTime"/> is measured with.</summary>
+    internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
+
+    /// <summary>Test seam: maps the number of failed attempts in a row to the delay before the next one.</summary>
+    internal Func<int, TimeSpan> ReconnectDelay { get; set; } = ReconnectBackoff.GetDelay;
+
     /// <summary>Raised for each channel-point redemption, once per redemption even across reconnects.</summary>
     public event EventHandler<RedemptionEvent>? RedemptionReceived;
     /// <summary>Raised for each streamer activity event (follow, sub, raid, …), including ones backfilled after a reconnect.</summary>
@@ -102,7 +115,7 @@ public sealed class CompanionEventStream
         {
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connecting);
 
-            (bool shouldStop, bool wasConnected) = await ConnectOnceAsync(token, cancellationToken).ConfigureAwait(false);
+            (bool shouldStop, bool stayedConnected) = await ConnectOnceAsync(token, cancellationToken).ConfigureAwait(false);
             if (shouldStop)
             {
                 return;
@@ -110,14 +123,14 @@ public sealed class CompanionEventStream
 
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Disconnected);
 
-            if (wasConnected)
+            if (stayedConnected)
             {
                 attempt = 0;
             }
 
             try
             {
-                await Task.Delay(ReconnectBackoff.GetDelay(attempt), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(ReconnectDelay(attempt), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -131,8 +144,8 @@ public sealed class CompanionEventStream
     /// <summary>Connects once. ShouldStop is true if the caller should stop retrying (auth failure).</summary>
     /// <param name="token">The companion bearer token to connect with.</param>
     /// <param name="cancellationToken">The caller's cancellation; a cancel also ends the connection.</param>
-    /// <returns>A task whose result says whether to stop retrying (a 401) and whether the stream connected successfully before it ended, which resets the backoff.</returns>
-    private async Task<(bool ShouldStop, bool WasConnected)> ConnectOnceAsync(string token, CancellationToken cancellationToken)
+    /// <returns>A task whose result says whether to stop retrying (a 401) and whether the stream stayed connected for at least <see cref="StableConnectionTime"/> before it ended, which resets the backoff.</returns>
+    private async Task<(bool ShouldStop, bool StayedConnected)> ConnectOnceAsync(string token, CancellationToken cancellationToken)
     {
         var requestUri = new Uri(_botHost, "/api/companion/events");
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
@@ -162,7 +175,7 @@ public sealed class CompanionEventStream
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested
             && ex is HttpRequestException or IOException or TaskCanceledException or System.Net.Sockets.SocketException)
         {
-            return (ShouldStop: false, WasConnected: false);
+            return (ShouldStop: false, StayedConnected: false);
         }
 
         using (response)
@@ -170,22 +183,23 @@ public sealed class CompanionEventStream
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
                 ConnectionStateChanged?.Invoke(this, CompanionConnectionState.AuthenticationFailed);
-                return (ShouldStop: true, WasConnected: false);
+                return (ShouldStop: true, StayedConnected: false);
             }
 
             if (response.StatusCode == (HttpStatusCode)429)
             {
                 ConnectionStateChanged?.Invoke(this, CompanionConnectionState.RateLimited);
-                return (ShouldStop: false, WasConnected: false);
+                return (ShouldStop: false, StayedConnected: false);
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return (ShouldStop: false, WasConnected: false);
+                return (ShouldStop: false, StayedConnected: false);
             }
 
             ConnectionStateChanged?.Invoke(this, CompanionConnectionState.Connected);
             ResetIdleTimer(idleCts, IdleTimeout);
+            long connectedAt = TimeProvider.GetTimestamp();
 
             try
             {
@@ -222,7 +236,7 @@ public sealed class CompanionEventStream
                 // same as the connect-phase catch above.
             }
 
-            return (ShouldStop: false, WasConnected: true);
+            return (ShouldStop: false, StayedConnected: TimeProvider.GetElapsedTime(connectedAt) >= StableConnectionTime);
         }
     }
 
