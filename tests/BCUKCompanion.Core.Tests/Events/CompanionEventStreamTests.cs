@@ -175,6 +175,53 @@ public class CompanionEventStreamTests
     }
 
     /// <summary>
+    /// An empty first-run baseline still reports a mark (0), so a host restarting before any
+    /// activity was handled catches up instead of baselining again and skipping it (issue #101).
+    /// </summary>
+    [Fact]
+    public async Task EmptyBaselineCatchUpReportsZeroSoTheNextRunCatchesUp()
+    {
+        const string sse = "data: {\"type\":\"follow\",\"id\":9,\"displayName\":\"Live\",\"detail\":null,\"occurredAt\":\"2026-01-01T00:02:00Z\"}\n\n";
+        var handler = new RoutingHttpMessageHandler(sse, recentEventsBody: """{"ok":true,"events":[]}""");
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"))
+        {
+            BaselineOnFirstCatchUp = true,
+        };
+
+        var received = new List<CompanionActivityEvent>();
+        var changes = new List<long>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+        stream.LastActivityEventIdChanged += (_, id) => changes.Add(id);
+
+        await RunUntilDisconnectedAsync(stream);
+
+        Assert.Equal("Live", Assert.Single(received).DisplayName);
+        Assert.Equal(new long[] { 0, 9 }, changes);
+    }
+
+    /// <summary>
+    /// The restart half of issue #101: seeded with the empty baseline's 0 rather than baselining,
+    /// the catch-up delivers a live activity whose handler never finished last run.
+    /// </summary>
+    [Fact]
+    public async Task SeededWithZeroCatchUpDeliversActivityFromBeforeTheRestart()
+    {
+        const string recent = """{"ok":true,"events":[{"type":"follow","id":9,"displayName":"Unhandled","detail":null,"occurredAt":"2026-01-01T00:02:00Z"}]}""";
+        var handler = new RoutingHttpMessageHandler(sseBody: string.Empty, recentEventsBody: recent);
+        var stream = new CompanionEventStream(new HttpClient(handler), new Uri("https://bot.example.com"))
+        {
+            LastActivityEventId = 0,
+        };
+
+        var received = new List<CompanionActivityEvent>();
+        stream.ActivityReceived += (_, e) => received.Add(e);
+
+        await RunUntilDisconnectedAsync(stream);
+
+        Assert.Equal("Unhandled", Assert.Single(received).DisplayName);
+    }
+
+    /// <summary>
     /// The new mark is reported only after the activity itself, so a host persisting it never
     /// records an activity it wasn't handed.
     /// </summary>

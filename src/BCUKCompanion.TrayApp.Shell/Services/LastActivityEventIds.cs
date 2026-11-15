@@ -20,14 +20,16 @@ internal sealed class LastActivityEventIds
     }
 
     /// <summary>
-    /// Seeds <paramref name="events"/> with the last activity id shown for its bot host. With
-    /// nothing saved yet (first run, or a new host), it's told to only record where the server is up to.
+    /// Seeds <paramref name="events"/> with the last activity id shown for its bot host. A saved 0
+    /// means a first-run baseline found no activity, so it resumes from 0 and catches up on anything
+    /// since. With nothing saved yet (first run, or a new host), it's told to only record where the
+    /// server is up to.
     /// </summary>
     /// <param name="events">A new client's event stream, not yet listening.</param>
     /// <param name="activityKey">The bot host's key, from <see cref="AppSettings.ActivityKey"/>.</param>
     public void Seed(CompanionEventStream events, string activityKey)
     {
-        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long lastActivityEventId) && lastActivityEventId > 0)
+        if (_settings.LastActivityEventIds.TryGetValue(activityKey, out long lastActivityEventId) && lastActivityEventId >= 0)
         {
             events.LastActivityEventId = lastActivityEventId;
         }

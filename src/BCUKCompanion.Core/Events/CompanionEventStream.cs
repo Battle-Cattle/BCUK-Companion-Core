@@ -74,7 +74,11 @@ public sealed class CompanionEventStream
 
     /// <summary>
     /// Raised with the new value whenever <see cref="LastActivityEventId"/> advances, so a host can
-    /// persist it and seed the next run with it (see <see cref="LastActivityEventId"/>).
+    /// persist it and seed the next run with it (see <see cref="LastActivityEventId"/>). Also raised
+    /// with 0 when a <see cref="BaselineOnFirstCatchUp"/> catch-up finds no activity: the baseline is
+    /// taken and there is nothing to skip, so a host that saves 0 should seed the next run with
+    /// <see cref="LastActivityEventId"/> = 0 rather than baseline again (which would skip whatever
+    /// arrived since).
     /// </summary>
     public event EventHandler<long>? LastActivityEventIdChanged;
 
@@ -323,11 +327,18 @@ public sealed class CompanionEventStream
             // Nothing is known about what was already shown, so treat everything the server
             // returned as seen rather than announcing it. Live events after this still go through.
             BaselineOnFirstCatchUp = false;
-            if (valid.Count > 0 && MarkSeen(valid[^1]))
+            if (valid.Count == 0)
+            {
+                // Nothing to skip: tell the host the baseline is taken, so a restart before any
+                // activity has been handled catches up normally instead of baselining again.
+                Raise(LastActivityEventIdChanged, 0L);
+            }
+            else if (MarkSeen(valid[^1]))
             {
                 // No activity to dispatch here, so the host only hears about the new mark.
                 Raise(LastActivityEventIdChanged, valid[^1].Id);
             }
+
             return;
         }
 
