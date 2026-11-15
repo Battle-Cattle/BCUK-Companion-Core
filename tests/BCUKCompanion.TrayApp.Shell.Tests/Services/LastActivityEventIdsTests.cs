@@ -21,21 +21,23 @@ public sealed class LastActivityEventIdsTests : IDisposable
 
     private CompanionEventStream Stream() => new(httpClient, new Uri(Key));
 
-    [Fact]
-    public void Seed_WithASavedId_ResumesFromIt()
+    [Theory]
+    [InlineData(42L)]
+    [InlineData(0L)] // an empty first-run baseline: nothing to skip, so catch up on everything since
+    public void Seed_WithASavedId_ResumesFromIt(long saved)
     {
-        var settings = new AppSettings { LastActivityEventIds = { [Key] = 42 } };
+        var settings = new AppSettings { LastActivityEventIds = { [Key] = saved } };
         CompanionEventStream events = Stream();
 
         new LastActivityEventIds(settings).Seed(events, Key);
 
-        Assert.Equal(42, events.LastActivityEventId);
+        Assert.Equal(saved, events.LastActivityEventId);
         Assert.False(events.BaselineOnFirstCatchUp);
     }
 
     [Theory]
     [InlineData(null)]
-    [InlineData(0L)]
+    [InlineData(-1L)]
     public void Seed_WithNothingSaved_OnlyRecordsWhereTheServerIsUpTo(long? saved)
     {
         var settings = new AppSettings();
@@ -60,6 +62,19 @@ public sealed class LastActivityEventIdsTests : IDisposable
         tracker.Save(Key, 5);
 
         Assert.Equal(10, AppSettings.Load().LastActivityEventIds[Key]);
+    }
+
+    [Fact]
+    public void Save_RecordsAnEmptyBaseline_SoTheNextRunCatchesUpInsteadOfBaseliningAgain()
+    {
+        var tracker = new LastActivityEventIds(new AppSettings());
+
+        tracker.Save(Key, 0);
+        CompanionEventStream events = Stream();
+        new LastActivityEventIds(AppSettings.Load()).Seed(events, Key);
+
+        Assert.False(events.BaselineOnFirstCatchUp);
+        Assert.Equal(0, events.LastActivityEventId);
     }
 
     [Fact]
