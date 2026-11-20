@@ -93,7 +93,7 @@ jobs:
           name: coverage-linux
           path: coverage
       - name: Publish coverage to Qlty
-        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
+        uses: qltysh/qlty-action/coverage@0ff2178667bf8eb28ed0013a7ef54857a24d4056 # v2.7.0
         with:
           oidc: true
           files: coverage/**/coverage.info
@@ -122,7 +122,7 @@ jobs:
           name: coverage-windows
           path: coverage
       - name: Publish coverage to Qlty
-        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
+        uses: qltysh/qlty-action/coverage@0ff2178667bf8eb28ed0013a7ef54857a24d4056 # v2.7.0
         with:
           oidc: true
           files: coverage/**/coverage.info
