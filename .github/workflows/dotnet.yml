@@ -152,9 +152,13 @@ jobs:
       - run: dotnet build src/BCUKCompanion.TrayApp.Shell -c Release
       - run: dotnet pack src/BCUKCompanion.Core -c Release --no-build --output ./packages
       - run: dotnet pack src/BCUKCompanion.TrayApp.Shell -c Release --no-build --output ./packages
-      - run: >
+      # GitHub Packages has no trusted-publishing (OIDC) support, only nuget.org does, so the
+      # job's GITHUB_TOKEN is the right credential and zizmor's suggestion doesn't apply.
+      - run: > # zizmor: ignore[use-trusted-publishing]
           dotnet nuget push ./packages/*.nupkg
           --source https://nuget.pkg.github.com/Battle-Cattle/index.json
-          --api-key ${{ secrets.GITHUB_TOKEN }}
+          --api-key "$GITHUB_TOKEN"
           --skip-duplicate
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
